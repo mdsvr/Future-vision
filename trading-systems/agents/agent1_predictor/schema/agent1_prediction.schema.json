@@ -1,0 +1,153 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Agent1Prediction",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "prediction_id",
+    "symbol",
+    "timestamp",
+    "action",
+    "confidence",
+    "recommended_allocation_pct",
+    "time_horizon",
+    "entry_price",
+    "stop_loss",
+    "targets",
+    "risk_reward_ratio",
+    "indicators_used",
+    "strategy_signals",
+    "market_regime",
+    "reasoning",
+    "provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "const": "1.0"
+    },
+    "prediction_id": {
+      "type": "string"
+    },
+    "symbol": {
+      "type": "string"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "BUY",
+        "SELL",
+        "HOLD"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "recommended_allocation_pct": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 100.0
+    },
+    "time_horizon": {
+      "type": "string",
+      "enum": [
+        "intraday",
+        "swing",
+        "positional"
+      ]
+    },
+    "entry_price": {
+      "type": "number",
+      "exclusiveMinimum": 0.0
+    },
+    "stop_loss": {
+      "type": "number",
+      "exclusiveMinimum": 0.0
+    },
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "number",
+        "exclusiveMinimum": 0.0
+      }
+    },
+    "risk_reward_ratio": {
+      "type": "number",
+      "minimum": 0.0
+    },
+    "indicators_used": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "patterns_detected": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "strategy_signals": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number"
+      }
+    },
+    "market_regime": {
+      "type": "string"
+    },
+    "reasoning": {
+      "type": "string"
+    },
+    "guardian_status": {
+      "type": "string",
+      "enum": [
+        "APPROVED",
+        "REJECTED"
+      ]
+    },
+    "guardian_reason": {
+      "type": "string"
+    },
+    "order_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "run_id",
+        "model",
+        "data_sources"
+      ],
+      "properties": {
+        "run_id": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "data_sources": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

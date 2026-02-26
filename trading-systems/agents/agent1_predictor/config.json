@@ -1,0 +1,41 @@
+{
+  "indicators": {
+    "ema_fast": 50,
+    "ema_slow": 200,
+    "rsi_period": 14,
+    "rsi_lower": 30,
+    "rsi_upper": 70,
+    "macd_fast": 12,
+    "macd_slow": 26,
+    "macd_signal": 9,
+    "obv_volume_avg_period": 20,
+    "obv_volume_spike_multiplier": 1.5,
+    "atr_period": 14
+  },
+  "risk": {
+    "allocation_pct": 2.0,
+    "stop_loss_atr_multiplier": 2.0,
+    "target_atr_multiplier": 4.0,
+    "max_daily_loss_pct": -5.0,
+    "risk_reward_ratio_min": 2.0
+  },
+  "guardian": {
+    "confidence_threshold": 0.55,
+    "atr_percentile_max": 0.95
+  },
+  "execution": {
+    "paper_trade": false,
+    "execution_mode": "paper",
+    "allow_network": false
+  },
+  "intelligence": {
+    "llm_provider": "openai",
+    "fallback_to_deterministic": true
+  },
+  "data": {
+    "symbol": "AAPL",
+    "interval": "5m",
+    "period": "15d",
+    "market_data_provider": "yfinance"
+  }
+}

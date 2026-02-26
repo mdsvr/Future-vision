@@ -1,0 +1,10 @@
+yfinance
+pandas
+numpy
+python-dotenv
+jsonschema
+openai
+anthropic
+google-generativeai
+alpaca-trade-api
+requests
