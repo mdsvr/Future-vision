@@ -10,7 +10,11 @@
     "macd_signal": 9,
     "obv_volume_avg_period": 20,
     "obv_volume_spike_multiplier": 1.5,
-    "atr_period": 14
+    "atr_period": 14,
+    "bollinger_period": 20,
+    "bollinger_std": 2,
+    "stoch_rsi_period": 14,
+    "obv_slope_period": 5
   },
   "risk": {
     "allocation_pct": 2.0,
@@ -29,13 +33,13 @@
     "allow_network": false
   },
   "intelligence": {
-    "llm_provider": "openai",
+    "llm_provider": "gemini",
     "fallback_to_deterministic": true
   },
   "data": {
-    "symbol": "AAPL",
-    "interval": "5m",
+    "symbol": "NSE:RELIANCE-EQ",
+    "interval": "15m",
     "period": "15d",
-    "market_data_provider": "yfinance"
+    "market_data_provider": "fyers"
   }
 }

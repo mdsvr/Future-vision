@@ -10,12 +10,21 @@ try:
 except ImportError:
     OpenAI = None
 
+# Optional: Attempt to load Google Generative AI for Gemini reasoning
+# Using the NEW google-genai SDK (replaces deprecated google.generativeai)
+try:
+    from google import genai as genai_client
+    _genai_available = True
+except ImportError:
+    genai_client = None
+    _genai_available = False
+
 logger = get_logger()
 
 class LLMRouter:
     """
     Intelligent Reasoning Router.
-    This class manages the interaction with various LLM providers (OpenAI, Claude, etc.)
+    This class manages the interaction with various LLM providers (OpenAI, OpenRouter, Gemini, etc.)
     and enforces a strict 'Deterministic Fallback' if network or APIs fail.
     """
     def __init__(self, provider="openai", allow_network=False):
@@ -34,35 +43,48 @@ class LLMRouter:
         Main entry point for generating descriptive reasoning.
         Priority:
         1. Local fallback if network is disabled.
-        2. Remote API (e.g. OpenAI) if allowed and configured.
+        2. Remote API (e.g. Gemini) if allowed and configured.
         3. Local fallback if API fails.
         """
-        # 🛡️ Safety: Block network if not explicitly allowed via CLI
+        # Safety: Block network if not explicitly allowed via CLI
         if not self.allow_network:
             logger.info("LLM Network disabled - Using deterministic (local) fallback reasoning.")
             return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile)
 
-        # Execute Intelligent Reasoning
-        try:
-            if self.provider == "openai" and OpenAI:
-                 return self._openai_reasoning(symbol, regime, signals, confidence)
-            
-            # --- Future Providers (Claude/Gemini) can be added here ---
-            
-            # Default to fallback if provider is unknown
-            return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile)
-        except Exception as e:
-            logger.error(f"LLM Provider {self.provider} failed: {e}")
-            if self.config.get("fallback_to_deterministic", True):
-                return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile)
-            return "Reasoning temporarily unavailable (LLM Service Error)."
+        # Cascade: try each provider in order, fallback to next on failure
+        providers_to_try = []
+
+        # Always try Gemini first (free, fast)
+        if _genai_available and Config.GOOGLE_API_KEY:
+            providers_to_try.append("gemini")
+        # Then OpenRouter (free models available)
+        if OpenAI and Config.OPENROUTER_API_KEY:
+            providers_to_try.append("openrouter")
+        # Then OpenAI (paid, most capable)
+        if OpenAI and Config.OPENAI_API_KEY and Config.OPENAI_API_KEY != "your_openai_key":
+            providers_to_try.append("openai")
+
+        for provider in providers_to_try:
+            try:
+                if provider == "gemini":
+                    return self._gemini_reasoning(symbol, regime, signals, confidence, atr_percentile)
+                elif provider == "openrouter":
+                    return self._openrouter_reasoning(symbol, regime, signals, confidence)
+                elif provider == "openai":
+                    return self._openai_reasoning(symbol, regime, signals, confidence)
+            except Exception as e:
+                logger.error(f"LLM Provider {provider} failed: {e}")
+                continue  # Try next provider
+
+        # All providers failed — use deterministic
+        logger.warning("All LLM providers failed or unavailable. Using deterministic reasoning.")
+        return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile)
 
     def _openai_reasoning(self, symbol, regime, signals, confidence):
         """Calls OpenAI GPT-4o-mini to explain the trading signal."""
         start_request_time = time.time()
         client = OpenAI(api_key=Config.OPENAI_API_KEY)
         
-        # We provide context but keep the prompt strict to ensure concise output
         prompt = (
             f"Asset: {symbol}\n"
             f"Market Regime: {regime}\n"
@@ -76,12 +98,88 @@ class LLMRouter:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.3, # Low temperature for consistency
+            temperature=0.3,
             max_tokens=150
         )
         latency = int((time.time() - start_request_time) * 1000)
         logger.info(f"OpenAI intelligence reasoning generated in {latency}ms")
         return response.choices[0].message.content.strip()
+
+    def _openrouter_reasoning(self, symbol, regime, signals, confidence):
+        """Calls OpenRouter API using the standard OpenAI client schema."""
+        start_request_time = time.time()
+        client = OpenAI(
+            base_url="https://openrouter.ai/api/v1",
+            api_key=Config.OPENROUTER_API_KEY,
+        )
+        
+        prompt = (
+            f"Asset: {symbol}\n"
+            f"Market Regime: {regime}\n"
+            f"Signals: {signals}\n"
+            f"System Confidence: {confidence}\n\n"
+            "Task: Explain this trading decision professionally. "
+            "Focus on how the signals align with the market regime. "
+            "Keep it under 3 sentences. Return text ONLY."
+        )
+
+        # Free models on OpenRouter (in preference order).
+        # If a model is deleted or unavailable (404), the next one is tried.
+        FREE_MODELS = [
+            "google/gemma-3-27b-it:free",         # Google Gemma 3 27B (best free)
+            "deepseek/deepseek-r1:free",           # DeepSeek R1 reasoning model
+            "meta-llama/llama-3.1-8b-instruct:free", # Llama 3.1 8B (updated name)
+            "mistralai/mistral-7b-instruct:free",  # Mistral 7B (reliable fallback)
+        ]
+
+        last_error = None
+        for model in FREE_MODELS:
+            try:
+                response = client.chat.completions.create(
+                    model=model,
+                    messages=[{"role": "user", "content": prompt}],
+                    temperature=0.3,
+                    max_tokens=150
+                )
+                latency = int((time.time() - start_request_time) * 1000)
+                logger.info(f"OpenRouter ({model}) reasoning generated in {latency}ms")
+                return response.choices[0].message.content.strip()
+            except Exception as e:
+                logger.warning(f"OpenRouter model {model} failed: {e}")
+                last_error = e
+                continue
+
+        # All models failed — raise the last error to trigger the outer cascade
+        raise Exception(f"All OpenRouter free models failed. Last error: {last_error}")
+
+    def _gemini_reasoning(self, symbol, regime, signals, confidence, atr_percentile):
+        """
+        Calls Google Gemini 2.0 Flash (free tier) using the new google.genai SDK.
+        Requires GOOGLE_API_KEY in .env.
+        """
+        start_request_time = time.time()
+
+        # Initialise client with the new SDK
+        client = genai_client.Client(api_key=Config.GOOGLE_API_KEY)
+
+        prompt = (
+            f"Asset: {symbol}\n"
+            f"Market Regime: {regime}\n"
+            f"Signals: {signals}\n"
+            f"System Confidence: {confidence}\n"
+            f"ATR Percentile (Volatility): {atr_percentile:.2f}\n\n"
+            "Task: Explain this trading decision professionally. "
+            "Focus on how the signals align with the market regime. "
+            "Keep it under 3 sentences. Return text ONLY."
+        )
+
+        response = client.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt
+        )
+        latency = int((time.time() - start_request_time) * 1000)
+        logger.info(f"Gemini intelligence reasoning generated in {latency}ms")
+        return response.text.strip()
 
     def _fallback_reasoning(self, symbol, regime, signals, confidence, atr_percentile):
         """
