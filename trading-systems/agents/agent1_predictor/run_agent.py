@@ -119,25 +119,50 @@ def select_symbol(market):
         print(f"    {CYAN}{sym:<25}{RESET} {name}")
     print()
 
-    symbol = input(BOLD + f"  Type a stock name (e.g. RELIANCE, TCS, INFY): " + RESET).strip().upper()
+    # Strip spaces and normalise input (e.g. "nifty 50" → "NIFTY50", "nifity" → handled below)
+    symbol = input(BOLD + f"  Type a stock name (e.g. RELIANCE, TCS, INFY): " + RESET)
+    symbol = symbol.strip().upper().replace(" ", "")  # Remove all spaces
     if not symbol:
         symbol = list(examples.keys())[0]
         print(f"  No input — using default: {symbol}")
 
     # Strip any prefix/suffix if user typed full Fyers format — extract clean ticker
     if ":" in symbol:
-        symbol = symbol.split(":")[-1].replace("-EQ", "").replace("-BE", "")
+        symbol = symbol.split(":")[-1].replace("-EQ", "").replace("-BE", "").replace("-INDEX", "")
         print(f"  Using ticker: {CYAN}{symbol}{RESET}")
 
     # ── NSE symbol aliases / corrections ─────────────────────────
-    # Fyers requires exact NSE ticker codes — fix common shortcuts
+    # Fyers requires exact NSE ticker codes — fix common shortcuts.
+    # Indices use a special key prefix "IDX:" so the symbol builder knows
+    # to format them as NSE:NIFTY50-INDEX instead of NSE:NIFTY50-EQ.
     NSE_ALIASES = {
+        # ── INDICES ── (use IDX: prefix to signal -INDEX suffix needed)
+        "NIFTY50":       "IDX:NIFTY50",
+        "NIFTY":         "IDX:NIFTY50",
+        "NIFTY50INDEX":  "IDX:NIFTY50",
+        "NIFTYFIFTY":    "IDX:NIFTY50",
+        "BANKNIFTY":     "IDX:NIFTYBANK",
+        "NIFTYBANK":     "IDX:NIFTYBANK",
+        "BANKINDEX":     "IDX:NIFTYBANK",
+        "FINNIFTY":      "IDX:FINNIFTY",
+        "NIFTYFIN":      "IDX:FINNIFTY",
+        "MIDCAPNIFTY":   "IDX:NIFTYMIDCAP50",
+        "MIDCPNIFTY":    "IDX:NIFTYMIDCAP50",
+        "NIFTYNEXT50":   "IDX:NIFTYNXT50",
+        "NIFTYNXT50":    "IDX:NIFTYNXT50",
+        "SENSEX":        "IDX:BSE:SENSEX",    # BSE:SENSEX-INDEX, NOT NSE
+        "BSE500":        "IDX:BSE:BSE500-INDEX",
+        # India VIX — computed index, volume is always zero
+        "INDIAVIX":      "IDX:NSE:INDIAVIX",
+        "INDIA_VIX":     "IDX:NSE:INDIAVIX",
+        "VIX":           "IDX:NSE:INDIAVIX",
+        "INDVIX":        "IDX:NSE:INDIAVIX",
+        # ── EQUITIES ── (typo corrections + common shortcuts)
         # HDFC merger: HDFC Ltd merged into HDFC Bank in 2023
         "HDFC":          "HDFCBANK",
         # Tata companies
         "TATA":          "TATAMOTORS",
         "TATAMOTOR":     "TATAMOTORS",
-        "TATASTEEL":     "TATASTEEL",
         # SBI
         "SBI":           "SBIN",
         "STATEBANK":     "SBIN",
@@ -167,8 +192,6 @@ def select_symbol(market):
         # Others
         "HERO":          "HEROMOTOCO",
         "BAJAJATO":      "BAJAJ-AUTO",
-        "NTPC":          "NTPC",
-        "POWERGRID":     "POWERGRID",
         "SUNPHARMA":     "SUNPHARMA",
         "DRREDDY":       "DRREDDY",
         "CIPLA":         "CIPLA",
@@ -177,13 +200,25 @@ def select_symbol(market):
         "JIOFINANCE":    "JIOFIN",
         "ZOMATO":        "ZOMATO",
         "PAYTM":         "PAYTM",
+        # ── Typo corrections ──
+        "NIFITY50":      "IDX:NIFTY50",    # typo: nifity
+        "NIFFTY50":      "IDX:NIFTY50",    # typo: niffty
+        "NIFTY5O":       "IDX:NIFTY50",    # typo: 5O vs 50
+        "RELAINCE":      "RELIANCE",        # common typo
+        "RELINACE":      "RELIANCE",
+        "INOFOSYS":      "INFY",
+        "INFOSYS":       "INFY",
+        "TATAMOTORS":    "TATAMOTORS",
     }
 
     if market == "INDIA" and symbol in NSE_ALIASES:
         corrected = NSE_ALIASES[symbol]
-        if corrected != symbol:
-            print(f"  {YELLOW}Note: '{symbol}' → using correct NSE ticker '{corrected}'{RESET}")
-            symbol = corrected
+        original  = symbol
+        # Strip the IDX: internal marker to show user the clean name
+        display_corrected = corrected.replace("IDX:", "")
+        if display_corrected != symbol:
+            print(f"  {YELLOW}Note: '{original}' → using '{display_corrected}'{RESET}")
+        symbol = corrected   # Keep IDX: prefix so symbol builder below knows the suffix
 
     # ── Smart cross-market check ──────────────────────────────
     # US stocks / names that users commonly type by mistake in India mode
@@ -228,8 +263,10 @@ def confirm(market, symbol):
     print(BOLD + "  Step 3 of 3 — Confirm & Run" + RESET)
     hr()
     print()
+    # Strip any internal IDX: or exchange prefix for clean display
+    display = symbol.split(":")[-1].replace("-EQ","").replace("-INDEX","").replace("IDX:","")
     print(f"  Market  :  {BOLD}{market} Stocks{RESET}")
-    print(f"  Symbol  :  {BOLD}{CYAN}{symbol}{RESET}")
+    print(f"  Symbol  :  {BOLD}{CYAN}{display}{RESET}")
     print()
     print("  The agent will:")
     print("    • Fetch the latest market data")
@@ -247,24 +284,29 @@ def confirm(market, symbol):
 
 CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 
-def patch_config(market, symbol, use_fyers=False):
-    """Update config.json to reflect selected market, symbol & provider."""
+def patch_config(market, run_symbol):
+    """
+    Update config.json to reflect selected market, provider and resolved symbol.
+
+    Args:
+        market     (str): "INDIA" or "US"
+        run_symbol (str): Fully resolved Fyers/yfinance symbol, e.g. 'NSE:RELIANCE-EQ'
+                          or 'NSE:INDIAVIX-INDEX' or 'AAPL'.
+                          This is written directly to config so it is never corrupted.
+    """
     with open(CONFIG_PATH, "r") as f:
         cfg = json.load(f)
 
+    cfg["data"]["symbol"] = run_symbol   # Always write the fully resolved symbol
+
     if market == "INDIA":
-        # Always use Fyers for Indian stocks (NSE:TICKER-EQ format)
-        fyers_symbol = f"NSE:{symbol}-EQ" if not symbol.startswith("NSE:") else symbol
-        cfg["data"]["symbol"] = fyers_symbol
         cfg["data"]["market_data_provider"] = "fyers"
         cfg["data"]["interval"] = "15m"
-        cfg["data"]["period"] = "15d"
+        cfg["data"]["period"]   = "15d"
     else:
-        # US stocks — plain ticker via yfinance
-        cfg["data"]["symbol"] = symbol
         cfg["data"]["market_data_provider"] = "yfinance"
         cfg["data"]["interval"] = "5m"
-        cfg["data"]["period"] = "15d"
+        cfg["data"]["period"]   = "15d"
 
     with open(CONFIG_PATH, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -457,26 +499,38 @@ def main():
             print()
             return
 
-    # Patch config.json with selected market & symbol
-    patch_config(market, symbol)
-
-    hr()
-    print(BOLD + "  Running Analysis... Please wait." + RESET)
-    hr()
-    print()
-
-    # Compute the actual symbol to pass to the engine
+    # Compute the actual Fyers-format symbol to pass to the engine
     if market == "INDIA":
-        run_symbol = f"NSE:{symbol}-EQ"   # e.g. NSE:RELIANCE-EQ
+        if symbol.startswith("IDX:"):
+            # Index symbol — format is IDX:[EXCHANGE:]TICKER
+            # e.g. IDX:NSE:INDIAVIX → NSE:INDIAVIX-INDEX
+            # e.g. IDX:BSE:SENSEX   → BSE:SENSEX-INDEX
+            # e.g. IDX:NIFTY50     → NSE:NIFTY50-INDEX (default to NSE)
+            inner = symbol[4:]   # Strip "IDX:"
+            if ":" in inner:
+                # Exchange explicitly embedded — use it as-is + -INDEX suffix
+                run_symbol = f"{inner}-INDEX"
+            else:
+                # No exchange specified — default to NSE
+                run_symbol = f"NSE:{inner}-INDEX"
+        else:
+            # Regular equity — uses -EQ suffix (e.g. NSE:RELIANCE-EQ)
+            run_symbol = f"NSE:{symbol}-EQ"
     else:
         run_symbol = symbol               # e.g. AAPL
+
+    # Friendly display name (no NSE:/BSE: prefix, no suffix)
+    display_sym = run_symbol.split(":")[-1].replace("-EQ", "").replace("-INDEX", "")
+
+    # Patch config.json with selected market & resolved symbol
+    patch_config(market, run_symbol)
 
     # Run the actual agent
     from main import run
     result = run(symbol=run_symbol, mode="LIVE_DATA", allow_network=True)
 
-    # Print friendly output (use friendly display name + correct currency)
-    friendly_output(result, symbol, market)
+    # Print friendly output — use clean display name and correct currency
+    friendly_output(result, display_sym, market)
 
     # Offer to run again
     again = ask("  Analyse another stock? (Y / N):", options=["Y", "N"])

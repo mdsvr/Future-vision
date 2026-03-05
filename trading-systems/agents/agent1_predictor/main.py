@@ -63,6 +63,12 @@ def run(symbol, mode="SAFE", allow_network=False):
     logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
     df = compute_features(df)
 
+    # Guard: compute_features may return an empty DataFrame if the data is too short
+    # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
+    if df is None or len(df) == 0:
+        logger.error("[Error] Aborting cycle: DataFrame empty after feature computation. Not enough valid data.")
+        return None
+
     # --- Step 3: Intelligence & Regime Detection ---
     # Determine the current market 'vibe' (Trending vs Mean Reverting)
     regime, hurst_value = classify_regime(df)
@@ -117,7 +123,15 @@ def run(symbol, mode="SAFE", allow_network=False):
 
     # --- Step 6: The Guardian (Final Safety Gate) ---
     # Guardian checks risk levels, volatility, and confidence before approving a trade
-    status, reason = run_guardian_checks(action, confidence, atr_percentile, allocation, entry_price, stop_loss)
+    status, reason = run_guardian_checks(
+        action=action,
+        confidence=confidence,
+        atr_percentile=atr_percentile,
+        allocation=allocation,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        atr_val=atr_val           # Pass real ATR (not approximated from percentile)
+    )
     logger.info(f"[Guardian] Gatekeeper -> Status: {status} | Reason: {reason}")
     
     if status == "REJECTED":
@@ -150,7 +164,12 @@ def run(symbol, mode="SAFE", allow_network=False):
         "stop_loss": stop_loss,
         "targets": [target],
         "risk_reward_ratio": config["risk"]["target_atr_multiplier"] / config["risk"]["stop_loss_atr_multiplier"],
-        "indicators_used": ["EMA_200", "EMA_50", "RSI", "MACD", "ATR", "OBV"],
+        "indicators_used": [
+            "EMA_200", "EMA_50",        # Trend
+            "RSI", "MACD", "StochRSI",  # Momentum
+            "ATR", "BollingerBands",    # Volatility
+            "OBV", "VWAP",              # Volume / Fair value
+        ],
         "patterns_detected": [],
         "strategy_signals": signals,
         "market_regime": f"{regime}_H{hurst_value}",

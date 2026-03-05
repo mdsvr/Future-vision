@@ -164,58 +164,70 @@ class FyersProvider(MarketDataProvider):
     def fetch(self, symbol, interval, period):
         """
         Fetches historical OHLCV candle data from Fyers for Indian market symbols.
-        
-        :param symbol: Fyers format, e.g. 'NSE:RELIANCE-EQ'
+
+        :param symbol: Fyers format, e.g. 'NSE:RELIANCE-EQ' or 'NSE:INDIA_VIX-INDEX'
         :param interval: time frame, e.g. '5m', '15m', '1d'
         :param period: lookback, e.g. '15d', '3mo'
         :return: cleaned OHLCV DataFrame or None
+
+        NOTE: Some index symbols (e.g. INDIA_VIX) are only available at daily
+        resolution on Fyers. If intraday fetch fails for an INDEX symbol, this
+        method automatically retries with daily ('D') interval and 1-year lookback.
         """
         client = self._get_client()
         if client is None:
             return None
 
+        is_index = "-INDEX" in symbol.upper()
+
+        def _fetch_with_resolution(res, range_from, range_to):
+            """Inner helper: fetch candles for a given resolution."""
+            data = {
+                "symbol":     symbol,
+                "resolution": res,
+                "date_format":"1",   # "1" = date string format (YYYY-MM-DD)
+                "range_from": range_from,
+                "range_to":   range_to,
+                "cont_flag":  "1",   # "1" = include continuous data for futures
+            }
+            try:
+                response = client.history(data=data)
+                if response.get("s") != "ok":
+                    logger.error(f"[Fyers] API Error response: {response}")
+                    return None
+                candles = response.get("candles", [])
+                if not candles:
+                    logger.warning(f"[Fyers] No candle data returned for {symbol}")
+                    return None
+                df = pd.DataFrame(candles, columns=["timestamp","open","high","low","close","volume"])
+                df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
+                df.set_index("timestamp", inplace=True)
+                logger.info(f"[Fyers] Fetched {len(df)} candles for {symbol} (resolution={res})")
+                return df
+            except Exception as e:
+                logger.error(f"[Fyers] Fetch error for {symbol}: {e}")
+                return None
+
+        # ── Primary fetch: use configured interval ─────────────────────────────
         fyers_resolution = self.INTERVAL_MAP.get(interval, "5")
         range_from, range_to = self._period_to_dates(period)
-
-        # --- Fyers API allows max 100 days per request ---
-        # For longer periods, we fetch in 100-day chunks and concatenate
         logger.info(f"[Fyers] Fetching {symbol} | Interval: {fyers_resolution} | Range: {range_from} to {range_to}")
 
-        data = {
-            "symbol": symbol,
-            "resolution": fyers_resolution,
-            "date_format": "1",          # "1" = date string format (YYYY-MM-DD)
-            "range_from": range_from,
-            "range_to": range_to,
-            "cont_flag": "1"             # "1" = include continuous data for futures
-        }
+        df = _fetch_with_resolution(fyers_resolution, range_from, range_to)
 
-        try:
-            response = client.history(data=data)
+        # ── Fallback: INDEX symbols often only have daily data ─────────────────
+        # e.g. NSE:INDIA_VIX-INDEX, NSE:NIFTY50-INDEX — retry with daily + 1yr
+        if df is None and is_index and fyers_resolution != "D":
+            logger.warning(
+                f"[Fyers] Intraday data unavailable for index {symbol}. "
+                f"Retrying with daily (D) resolution over 1 year..."
+            )
+            daily_from, daily_to = self._period_to_dates("365d")
+            df = _fetch_with_resolution("D", daily_from, daily_to)
+            if df is not None:
+                logger.info(f"[Fyers] Daily fallback succeeded for {symbol} ({len(df)} days)")
 
-            # Fyers returns: {"s": "ok", "candles": [[timestamp, o, h, l, c, v], ...]}
-            if response.get("s") != "ok":
-                logger.error(f"[Fyers] API Error response: {response}")
-                return None
-
-            candles = response.get("candles", [])
-            if not candles:
-                logger.warning(f"[Fyers] No candle data returned for {symbol}")
-                return None
-
-            # Build DataFrame from candle array
-            df = pd.DataFrame(candles, columns=["timestamp", "open", "high", "low", "close", "volume"])
-
-            # Convert epoch timestamp to datetime index
-            df["timestamp"] = pd.to_datetime(df["timestamp"], unit="s")
-            df.set_index("timestamp", inplace=True)
-
-            logger.info(f"[Fyers] Fetched {len(df)} candles for {symbol}")
-            return df
-
-        except Exception as e:
-            logger.error(f"[Fyers] Fetch error for {symbol}: {e}")
-            return None
+        return df
 
 class AlphaVantageProvider(MarketDataProvider):
     """
@@ -397,7 +409,12 @@ def fetch_ohlcv(symbol: str) -> pd.DataFrame:
         # Drop rows with NaNs or zero volume (market closed or glitched data)
         df = df[required_cols].copy()
         df.dropna(inplace=True)
-        df = df[df['volume'] > 0]
+
+        # Skip volume filter for INDEX symbols (VIX, NIFTY50 etc. have zero volume
+        # because they are computed indices, not traded instruments)
+        is_index = "-INDEX" in symbol.upper()
+        if not is_index:
+            df = df[df['volume'] > 0]   # For equities: drop market-closed / glitch rows
         
         # Ensure we have enough data to calculate EMA_200
         if len(df) < 200:

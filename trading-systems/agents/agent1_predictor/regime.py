@@ -37,23 +37,46 @@ def calculate_hurst_exponent(series, max_lag=20):
         max_lag  (int):   How many lag steps to check. More = slower but more accurate.
     
     Returns:
-        float: Hurst exponent H (between 0 and 1)
+        float: Hurst exponent H (between 0 and 1), or 0.5 if computation fails.
+    
+    Edge cases handled:
+        - Constant/flat series (e.g. VIX warm-up rows) → all tau=0 → log(0)=error → returns 0.5
+        - Too few rows → falls back to max_lag=min(len,20) or returns 0.5
     """
-    lags = range(2, max_lag)
+    try:
+        lags = range(2, min(max_lag, len(series) // 2))
+        if len(list(lags)) < 3:
+            return 0.5   # Not enough data — call it random
 
-    # For each lag distance, calculate the standard deviation of price differences
-    # This measures how much prices diverge as we look further apart in time
-    tau = [
-        np.sqrt(np.std(series[lag:] - series[:-lag]))
-        for lag in lags
-    ]
+        # For each lag distance, calculate the standard deviation of price differences
+        # This measures how much prices diverge as we look further apart in time
+        tau = [
+            np.sqrt(np.std(series[lag:] - series[:-lag]))
+            for lag in lags
+        ]
 
-    # Fit a straight line on a log-log scale
-    # The slope of this line IS the Hurst Exponent
-    poly = np.polyfit(np.log(lags), np.log(tau), 1)
+        # Guard: if all tau values are zero (perfectly flat series), log(0) is undefined
+        tau = np.array(tau)
+        valid = tau > 0
+        if valid.sum() < 3:
+            return 0.5   # Flat/constant data — treat as random
 
-    # Multiply by 2 to normalize to the standard 0-1 scale
-    return poly[0] * 2.0
+        lags_arr = np.array(list(lags))[valid]
+        tau_arr  = tau[valid]
+
+        # Fit a straight line on a log-log scale
+        # The slope of this line IS the Hurst Exponent
+        poly = np.polyfit(np.log(lags_arr), np.log(tau_arr), 1)
+        h = poly[0] * 2.0
+
+        # Sanity check: H should be between 0 and 1
+        if not np.isfinite(h) or h < 0 or h > 1:
+            return 0.5   # Bad result — default to random
+
+        return h
+
+    except Exception:
+        return 0.5   # Any unexpected error → call it random
 
 
 def classify_regime(df):

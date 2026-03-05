@@ -139,8 +139,31 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     #
     # For intraday candles: cumulative sum of (typical price × volume) / cumulative volume
     # Typical price = (high + low + close) / 3
+    #
+    # NOTE: For INDEX symbols (VIX, NIFTY50 etc.), volume is always 0.
+    # To avoid NaN from 0/0, we fall back to using the close price as VWAP.
     tp = (df['high'] + df['low'] + df['close']) / 3   # Typical price per candle
-    df['vwap'] = (tp * df['volume']).cumsum() / df['volume'].cumsum()
+    cumvol = df['volume'].cumsum()
+    if cumvol.iloc[-1] == 0:
+        # Zero-volume index: VWAP is meaningless — use close as a proxy
+        df['vwap'] = df['close']
+    else:
+        df['vwap'] = (tp * df['volume']).cumsum() / cumvol.replace(0, float('nan'))
+        df['vwap'] = df['vwap'].ffill()  # Forward-fill any gaps from partial zero-volume candles
 
-    # Drop warm-up rows where indicators aren't fully initialized
-    return df.dropna()
+    # Drop warm-up rows using only the core trend indicators as the NaN gate.
+    # We do NOT use df.dropna() on all columns because:
+    #   - Index symbols have volume=0 → OBV/volume_spike cols may stay NaN all rows
+    #   - We only need EMA, RSI, MACD, BB, ATR to be ready before we can analyse
+    core_cols = ['ema_200', 'ema_50', 'rsi', 'macd', 'macd_signal',
+                 'bb_upper', 'bb_lower', 'atr']
+    df = df.dropna(subset=core_cols)
+
+    # Fill any remaining NaN in optional cols with safe neutral values
+    df['stoch_rsi']    = df['stoch_rsi'].fillna(0.5)    # Neutral StochRSI
+    df['obv_slope']    = df['obv_slope'].fillna(0)       # Flat OBV slope
+    df['volume_avg']   = df['volume_avg'].fillna(0)
+    df['volume_spike'] = df['volume_spike'].fillna(False)
+    df['vwap']         = df['vwap'].fillna(df['close'])  # VWAP fallback to close
+
+    return df

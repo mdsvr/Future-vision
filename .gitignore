@@ -34,3 +34,8 @@ logs/
 
 # Project specific
 Future vision/trading-systems/agents/agent1_predictor/logs/
+
+# Fyers installer binary
+FYERS Claude Desktop Installer/
+*.exe
+*.dll

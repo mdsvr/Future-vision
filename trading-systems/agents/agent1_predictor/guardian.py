@@ -138,17 +138,20 @@ class GuardianAgent:
 # main.py does: from guardian import run_guardian_checks
 # This function keeps that import working without changing main.py.
 
-def run_guardian_checks(action, confidence, atr_percentile, allocation, entry_price, stop_loss):
+def run_guardian_checks(action, confidence, atr_percentile, allocation,
+                        entry_price, stop_loss, atr_val=None):
     """
     Backward-compatible wrapper so main.py doesn't need to be modified.
 
-    Old call in main.py:
-        status, reason = run_guardian_checks(
-            action, confidence, atr_percentile, allocation, entry_price, stop_loss
-        )
-
-    Internally uses GuardianAgent and translates "BLOCKED" → "REJECTED"
-    (main.py checks: if status == "REJECTED")
+    Args:
+        action         (str):   "BUY", "SELL", or "HOLD"
+        confidence     (float): AI conviction score (0.0–1.0)
+        atr_percentile (float): Percentile rank of current ATR (0–1)
+        allocation     (float): Proposed portfolio allocation %
+        entry_price    (float): Entry price
+        stop_loss      (float): Stop-loss price
+        atr_val        (float): OPTIONAL — actual ATR value in price units.
+                                If not provided, estimated from atr_percentile.
     """
     guardian = GuardianAgent()
 
@@ -156,8 +159,14 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation, entry_pr
     risk   = abs(entry_price - stop_loss) if entry_price != stop_loss else entry_price * 0.01
     target = (entry_price + risk * 2) if action == "BUY" else (entry_price - risk * 2)
 
-    # Approximate ATR from the percentile (atr_percentile × 1% of price)
-    approx_atr = atr_percentile * entry_price * 0.01
+    # Use real ATR if provided, otherwise fall back to rough estimate
+    # Real ATR is always preferred — the estimate can be inaccurate for volatile symbols
+    if atr_val is not None and atr_val > 0:
+        atr = atr_val
+    else:
+        # Fallback: approximate from percentile (1% of price per ATR unit)
+        atr = atr_percentile * entry_price * 0.01
+        logger.debug(f"[Guardian] Using estimated ATR={atr:.2f} (real ATR not provided)")
 
     status, reason, _ = guardian.evaluate(
         action=action,
@@ -166,8 +175,8 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation, entry_pr
         stop_loss=stop_loss,
         targets=[target],
         allocation_pct=allocation,
-        atr=approx_atr
+        atr=atr
     )
 
-    # Translate to the old return vocabulary
+    # Translate to the old return vocabulary (main.py checks for "REJECTED")
     return ("REJECTED" if status == "BLOCKED" else status), reason
