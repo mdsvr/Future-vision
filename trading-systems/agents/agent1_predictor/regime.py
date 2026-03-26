@@ -23,6 +23,7 @@ Used by: main.py → passed to confidence.py and llm_reasoner.py
 """
 
 import numpy as np
+import pandas as pd
 
 
 def calculate_hurst_exponent(series, max_lag=20):
@@ -81,16 +82,23 @@ def calculate_hurst_exponent(series, max_lag=20):
 
 def classify_regime(df):
     """
-    Classifies the current market environment into one of 3 regimes.
-    
+    Classifies the current market environment into one of 4 regimes.
+
+    Regime priority order:
+      1. VOLATILE     — ATR spike > 2× rolling mean (overrides Hurst)
+      2. TRENDING     — Hurst > 0.55
+      3. MEAN_REVERTING — Hurst < 0.45
+      4. RANDOM       — 0.45 ≤ Hurst ≤ 0.55
+
     Args:
-        df (DataFrame): OHLCV data with at least a 'close' column.
-    
+        df (DataFrame): OHLCV data with 'close' column.
+                        If 'atr' column is present, it is used for volatile detection.
+
     Returns:
         tuple: (regime_name, hurst_value)
-            regime_name: "trending" | "mean_reverting" | "random"
+            regime_name: "trending" | "mean_reverting" | "volatile" | "random"
             hurst_value: the raw H value (e.g. 0.62)
-    
+
     Example:
         regime, hurst = classify_regime(df)
         # regime = "trending", hurst = 0.62
@@ -98,12 +106,24 @@ def classify_regime(df):
     close_series = df['close'].values
     hurst = calculate_hurst_exponent(close_series)
 
-    # Standard quant thresholds for regime classification
+    # ── Hurst-based primary classification ────────────────────────────────────
     if hurst > 0.55:
-        regime = "trending"       # Strong directional move
+        regime = "trending"
     elif hurst < 0.45:
-        regime = "mean_reverting" # Price oscillates around a mean
+        regime = "mean_reverting"
     else:
-        regime = "random"         # No clear structure — proceed with caution
+        regime = "random"
+
+    # ── Volatile override via ATR z-score ─────────────────────────────────────
+    # If the latest ATR is > 2× its 50-period rolling mean, the market is in a
+    # spike/crisis state. This overrides the Hurst classification entirely because
+    # technical mean reversion or trend signals become unreliable in spike conditions.
+    if 'atr' in df.columns:
+        atr_series   = df['atr'].dropna()
+        if len(atr_series) >= 10:
+            atr_mean_50  = atr_series.rolling(min(50, len(atr_series))).mean().iloc[-1]
+            atr_current  = atr_series.iloc[-1]
+            if atr_mean_50 > 0 and atr_current > 2.0 * atr_mean_50:
+                regime = "volatile"
 
     return regime, round(hurst, 3)

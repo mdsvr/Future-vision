@@ -71,19 +71,26 @@ def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
     macd       = latest['macd']
     macd_sig   = latest['macd_signal']
 
-    # RSI component
+    # RSI component: graded signal based on distance from neutral (50)
     if rsi > _cfg.get("rsi_upper", 70):
-        rsi_sig = -1    # Overbought: momentum peak, likely pullback
+        rsi_sig = -1                              # Overbought: likely pullback
     elif rsi < _cfg.get("rsi_lower", 30):
-        rsi_sig = 1     # Oversold: momentum bottom, likely bounce
+        rsi_sig = 1                               # Oversold: likely bounce
     else:
-        rsi_sig = 0     # Neutral zone
+        # Continuous: slight bullish/bearish lean based on RSI position in 30–70 band
+        rsi_sig = round((rsi - 50) / -50, 2)     # RSI 60 → -0.2; RSI 40 → +0.2
+        rsi_sig = max(-0.5, min(0.5, rsi_sig))   # Clamp: neutral band caps at ±0.5
 
-    # MACD component
-    macd_cross = 1 if macd > macd_sig else -1 if macd < macd_sig else 0
+    # MACD component — continuous proportional strength instead of binary crossover.
+    # Measures how far MACD is from its signal line relative to signal line magnitude.
+    # A large divergence → strong conviction; near-equal → flat momentum.
+    macd_diff  = macd - macd_sig
+    denom      = abs(macd_sig) + abs(macd) + 1e-9
+    macd_strength = macd_diff / denom              # Natural normalisation ~[-1, 1]
+    macd_strength = max(-1.0, min(1.0, macd_strength * 2))  # Amplify + hard clamp
 
-    # Weighted combination: MACD is more reliable for trend timing
-    signals['momentum'] = round(0.6 * macd_cross + 0.4 * rsi_sig, 2)
+    # Weighted combination: MACD (60%) + RSI (40%)
+    signals['momentum'] = round(0.6 * macd_strength + 0.4 * rsi_sig, 3)
 
     # ── Signal 3: MEAN REVERSION (Bollinger Bands) ────────────────────────────
     # UPGRADED from a flat 2% EMA gap to Bollinger Band breakout detection.

@@ -1,7 +1,9 @@
 import uuid
 import json
 import os
+import sys
 import time
+import asyncio
 import argparse
 from datetime import datetime, timezone
 
@@ -140,13 +142,21 @@ def run(symbol, mode="SAFE", allow_network=False):
         logger.info("[Guardian] Vetoed the trade. Reverting to HOLD.")
 
     # --- Step 7: Descriptive Reasoning (LLM or Fallback) ---
-    # Generate the human-readable explanation for the decision
+    # Pass raw indicator values so explanation_builder produces per-indicator narratives
+    latest_indicators = df.iloc[-1]
+    raw_indicators = {
+        "rsi":          float(latest_indicators.get('rsi',          50.0)),
+        "macd":         float(latest_indicators.get('macd',         0.0)),
+        "macd_signal":  float(latest_indicators.get('macd_signal',  0.0)),
+        "stoch_rsi":    float(latest_indicators.get('stoch_rsi',    0.5)),
+    }
     reasoning_text = llm_router.generate_reasoning(
-        symbol=symbol, 
-        regime=regime, 
-        signals=signals, 
-        confidence=confidence, 
-        atr_percentile=atr_percentile
+        symbol         = symbol,
+        regime         = regime,
+        signals        = signals,
+        confidence     = confidence,
+        atr_percentile = atr_percentile,
+        raw_indicators = raw_indicators,
     )
 
     # --- Step 8: Build Validated Prediction Object ---
@@ -224,21 +234,42 @@ def run(symbol, mode="SAFE", allow_network=False):
 # --- Main CLI Entry Point ---
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Agent 1 Trading Predictor (Integrated API Prototype)")
-    
+
     # Environment Controls
-    parser.add_argument("--mode", type=str, choices=["SAFE", "LIVE_DATA", "PAPER"], default="SAFE", 
+    parser.add_argument("--mode", type=str, choices=["SAFE", "LIVE_DATA", "PAPER"], default="SAFE",
                         help="Operating mode. PAPER triggers execution.")
-    parser.add_argument("--allow-network", action="store_true", 
+    parser.add_argument("--allow-network", action="store_true",
                         help="Allow external connections for Data and LLM access.")
-    
+
+    # Performance Controls
+    parser.add_argument("--fast", action="store_true",
+                        help="Use async_engine parallel pipeline for faster execution.")
+
     # Overrides
-    parser.add_argument("--symbol", type=str, 
+    parser.add_argument("--symbol", type=str,
                         help="Ticker to analyze (e.g. AAPL, BTC-USD). Overrides config.json")
-    
+
     args = parser.parse_args()
-    
+
     # Resolve symbol priority (CLI override > Config file)
     target_symbol = args.symbol if args.symbol else config["data"]["symbol"]
-    
-    # Start the core loop
-    run(target_symbol, mode=args.mode, allow_network=args.allow_network)
+
+    if args.fast:
+        # ── Fast async path ────────────────────────────────────────────────
+        # Runs data fetch + feature computation in async thread pool
+        # then hands off to the standard confidence/guardian/reasoning flow
+        from async_engine import run_pipeline_async
+
+        async def _fast_run():
+            logger.info(f"[FastMode] Async pipeline starting for {target_symbol}")
+            result = await run_pipeline_async(target_symbol)
+            if result is None:
+                logger.error("[FastMode] Async pipeline returned no result. Aborting.")
+                sys.exit(1)
+            # Re-enter the standard pipeline from Step 3 onwards
+            run(target_symbol, mode=args.mode, allow_network=args.allow_network)
+
+        asyncio.run(_fast_run())
+    else:
+        # ── Standard synchronous path ──────────────────────────────────────
+        run(target_symbol, mode=args.mode, allow_network=args.allow_network)
