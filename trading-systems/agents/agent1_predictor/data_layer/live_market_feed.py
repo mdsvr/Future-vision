@@ -80,10 +80,14 @@ class FyersProvider(MarketDataProvider):
     def _period_to_dates(self, period: str):
         today = datetime.today()
         period = period.lower()
-        if period.endswith("d"): days = int(period[:-1])
-        elif period.endswith("mo"): days = int(period[:-2]) * 30
-        elif period.endswith("y"): days = int(period[:-1]) * 365
-        else: days = 30
+        try:
+            if period.endswith("d"): days = int(period[:-1])
+            elif period.endswith("mo"): days = int(period[:-2]) * 30
+            elif period.endswith("y"): days = int(period[:-1]) * 365
+            else: days = 30
+        except ValueError:
+            logger.warning(f"Invalid period format: {period}. Defaulting to 30d.")
+            days = 30
         start = today - timedelta(days=days)
         return start.strftime("%Y-%m-%d"), today.strftime("%Y-%m-%d")
 
@@ -149,7 +153,7 @@ class AlphaVantageProvider(MarketDataProvider):
 
         try:
             async with aiohttp.ClientSession() as session:
-                async with session.get(self.BASE_URL, params=params, timeout=15) as response:
+                async with session.get(self.BASE_URL, params=params, timeout=aiohttp.ClientTimeout(total=15)) as response:
                     response.raise_for_status()
                     data = await response.json()
 
@@ -181,13 +185,16 @@ async def fetch_ohlcv(symbol: str) -> pd.DataFrame:
     """
     Async fetch and validate OHLCV data with Redis caching.
     """
-    config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
-    with open(config_path, "r") as f:
-        config = json.load(f)["data"]
+    def load_config():
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+        with open(config_path, "r") as f:
+            return json.load(f)["data"]
+    
+    config = await asyncio.to_thread(load_config)
     
     provider_name = config.get("market_data_provider", "yfinance")
-    interval = config["interval"]
-    period = config["period"]
+    interval = config.get("interval", "15m")
+    period = config.get("period", "15d")
     
     # --- 1. Check Cache ---
     cache_key = f"ohlcv:{symbol}:{interval}:{period}:{provider_name}"
@@ -211,7 +218,9 @@ async def fetch_ohlcv(symbol: str) -> pd.DataFrame:
     
     if df is not None:
         required_cols = ['open', 'high', 'low', 'close', 'volume']
-        if not all(col in df.columns for col in required_cols):
+        missing = [c for c in required_cols if c not in df.columns]
+        if missing:
+             logger.warning(f"Missing required market columns: {missing}")
              return None
              
         df = df[required_cols].copy()

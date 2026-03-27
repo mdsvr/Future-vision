@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +19,8 @@ class RedisCacheManager:
     or Redis isn't installed, it gracefully falls back to an in-memory dictionary.
     """
     def __init__(self, host="localhost", port=6379, db=0):
+        self._host = host
+        self._port = port
         self._cache = {}  # In-memory fallback
         self.use_redis = False
         self.redis_client = None
@@ -41,7 +44,7 @@ class RedisCacheManager:
                 self.use_redis = True
                 logger.info("Connected to Redis successfully.")
             except Exception as e:
-                logger.warning(f"Redis is not running on localhost:6379 ({e}). Falling back to in-memory dict cache.")
+                logger.warning(f"Redis is not running on {self._host}:{self._port} ({e}). Falling back to in-memory dict cache.")
                 self.redis_client = None
 
     async def get(self, key: str):
@@ -60,13 +63,13 @@ class RedisCacheManager:
             item = self._cache.get(key)
             if item:
                 # Check expiration
-                if item["expires_at"] and asyncio.get_event_loop().time() > item["expires_at"]:
+                if item["expires_at"] and asyncio.get_running_loop().time() > item["expires_at"]:
                     del self._cache[key]
                     return None
                 return item["value"]
             return None
 
-    async def set(self, key: str, value: any, ttl_seconds: int = 60):
+    async def set(self, key: str, value: Any, ttl_seconds: int = 60):
         """Sets a value in cache with an expiration time."""
         await self._check_connection()
 
@@ -77,7 +80,7 @@ class RedisCacheManager:
                 logger.error(f"Redis SET error: {e}")
         else:
             # Fallback logic
-            expires_at = asyncio.get_event_loop().time() + ttl_seconds if ttl_seconds else None
+            expires_at = asyncio.get_running_loop().time() + ttl_seconds if ttl_seconds else None
             self._cache[key] = {"value": value, "expires_at": expires_at}
 
 # Singleton instance

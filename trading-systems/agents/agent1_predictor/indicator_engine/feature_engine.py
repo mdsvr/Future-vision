@@ -33,8 +33,16 @@ import os
 
 # ── Load indicator periods from config.json ────────────────────────────────
 _CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
-with open(_CONFIG_PATH, "r") as f:
-    _cfg = json.load(f)["indicators"]
+def _load_config():
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            return json.load(f).get("indicators", {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to load indicator config: {e}")
+        return {}
+
+_cfg = _load_config()
 
 
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -129,8 +137,8 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     tr1 = df['high'] - df['low']
     tr2 = abs(df['high'] - df['close'].shift())
     tr3 = abs(df['low']  - df['close'].shift())
-    df['tr']  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    df['atr'] = df['tr'].rolling(_cfg["atr_period"]).mean()
+    tr_series  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+    df['atr'] = tr_series.rolling(_cfg.get("atr_period", 14)).mean()
 
     # ── VOLUME WEIGHTED AVERAGE PRICE (VWAP) ─────────────────────────────────
     # VWAP = best intraday "fair value" benchmark used by institutional traders.
@@ -142,6 +150,10 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     #
     # NOTE: For INDEX symbols (VIX, NIFTY50 etc.), volume is always 0.
     # To avoid NaN from 0/0, we fall back to using the close price as VWAP.
+    if df.empty or df['volume'].size == 0:
+        df['vwap'] = df.get('close', np.nan)
+        return df
+
     tp = (df['high'] + df['low'] + df['close']) / 3   # Typical price per candle
     cumvol = df['volume'].cumsum()
     if cumvol.iloc[-1] == 0:

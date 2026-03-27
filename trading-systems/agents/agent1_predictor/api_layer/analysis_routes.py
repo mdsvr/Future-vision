@@ -4,6 +4,9 @@ from pydantic import BaseModel
 import sys
 import os
 
+from logger import get_logger
+logger = get_logger()
+
 from data_layer.live_market_feed import fetch_ohlcv
 from main import run as agent_pipeline
 
@@ -60,7 +63,8 @@ async def analyze_stock(
             precomputed_df=df
         )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        logger.exception("Agent pipeline crashed")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
     if not result:
         raise HTTPException(status_code=500, detail="Agent pipeline failed to produce a valid prediction.")

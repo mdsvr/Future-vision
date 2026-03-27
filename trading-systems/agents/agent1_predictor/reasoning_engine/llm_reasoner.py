@@ -90,7 +90,7 @@ class LLMRouter:
 
         # All providers failed — use deterministic
         logger.warning("All LLM providers failed or unavailable. Using deterministic reasoning.")
-        return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile)
+        return self._fallback_reasoning(symbol, regime, signals, confidence, atr_percentile, raw_indicators=raw_indicators)
 
     def _openai_reasoning(self, symbol, regime, signals, confidence):
         """Calls OpenAI GPT-4o-mini to explain the trading signal."""
@@ -111,7 +111,8 @@ class LLMRouter:
             model="gpt-4o-mini",
             messages=[{"role": "user", "content": prompt}],
             temperature=0.3,
-            max_tokens=150
+            max_tokens=150,
+            timeout=10.0
         )
         latency = int((time.time() - start_request_time) * 1000)
         logger.info(f"OpenAI intelligence reasoning generated in {latency}ms")
@@ -157,7 +158,8 @@ class LLMRouter:
                         model=model,
                         messages=[{"role": "user", "content": prompt}],
                         temperature=0.3,
-                        max_tokens=150
+                        max_tokens=150,
+                        timeout=10.0
                     )
                     latency = int((time.time() - start_request_time) * 1000)
                     logger.info(f"OpenRouter ({model}) reasoning generated in {latency}ms")
@@ -191,13 +193,22 @@ class LLMRouter:
             "Keep it under 3 sentences. Return text ONLY."
         )
 
-        response = client.models.generate_content(
-            model="gemini-2.0-flash",
-            contents=prompt
-        )
-        latency = int((time.time() - start_request_time) * 1000)
-        logger.info(f"Gemini intelligence reasoning generated in {latency}ms")
-        return response.text.strip()
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash",
+                contents=prompt,
+                config={"timeout": 15.0}
+            )
+            latency = int((time.time() - start_request_time) * 1000)
+            
+            if not getattr(response, "text", None):
+                raise ValueError("Empty/missing text in Gemini response object")
+                
+            logger.info(f"Gemini intelligence reasoning generated in {latency}ms")
+            return response.text.strip()
+        except Exception as e:
+            logger.error(f"Gemini reasoning failed: {e}")
+            raise
 
     def _fallback_reasoning(self, symbol, regime, signals, confidence, atr_percentile, raw_indicators=None):
         """
