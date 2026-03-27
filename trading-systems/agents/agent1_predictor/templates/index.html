@@ -1,0 +1,371 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quintyx | Agent 1 Dashboard</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-dark: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #38bdf8;
+            --text-main: #f1f5f9;
+            --text-dim: #94a3b8;
+            --success: #22c55e;
+            --danger: #ef4444;
+            --warning: #f59e0b;
+            --info: #0ea5e9;
+        }
+
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            background-color: var(--bg-dark);
+            color: var(--text-main);
+            font-family: 'Inter', sans-serif;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* --- Header --- */
+        header {
+            padding: 1rem 2rem;
+            background: rgba(30, 41, 59, 0.8);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .logo { font-size: 1.5rem; font-weight: 700; letter-spacing: -1px; color: var(--accent); }
+        .controls { display: flex; gap: 1rem; align-items: center; }
+
+        input, select, button {
+            background: var(--card-bg);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 0.5rem 1rem;
+            color: white;
+            border-radius: 6px;
+            font-family: inherit;
+        }
+
+        button {
+            background: var(--accent);
+            color: var(--bg-dark);
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        button:hover { filter: brightness(1.2); transform: translateY(-1px); }
+        button:disabled { background: var(--text-dim); cursor: not-allowed; }
+
+        /* --- Layout --- */
+        main {
+            display: grid;
+            grid-template-columns: 400px 1fr 350px;
+            gap: 1.5rem;
+            padding: 1.5rem;
+            flex: 1;
+            overflow: hidden;
+        }
+
+        .pane {
+            background: var(--card-bg);
+            border-radius: 12px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+        }
+
+        .pane-header {
+            padding: 1rem;
+            background: rgba(255, 255, 255, 0.03);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            font-weight: 600;
+            font-size: 0.875rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-dim);
+            display: flex;
+            justify-content: space-between;
+        }
+
+        /* --- Logs Pane --- */
+        #logs-container {
+            flex: 1;
+            padding: 1rem;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.8rem;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            line-height: 1.6;
+            background: #000;
+        }
+
+        .log-line { margin-bottom: 0.25rem; }
+        .log-INFO { color: var(--text-dim); }
+        .log-WARNING { color: var(--warning); }
+        .log-ERROR { color: var(--danger); font-weight: bold; }
+        .log-SUCCESS { color: var(--success); }
+
+        /* --- Analysis Pane --- */
+        #prediction-view {
+            flex: 1;
+            padding: 2rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 2rem;
+        }
+
+        .hero-stat { text-align: center; margin-bottom: 1rem; }
+        .action-badge {
+            display: inline-block;
+            padding: 0.5rem 2rem;
+            border-radius: 100px;
+            font-size: 2rem;
+            font-weight: 800;
+            margin-bottom: 0.5rem;
+        }
+        .action-BUY { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 2px solid var(--success); }
+        .action-SELL { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 2px solid var(--danger); }
+        .action-HOLD { background: rgba(148, 163, 184, 0.2); color: var(--text-dim); border: 2px solid var(--text-dim); }
+
+        .confidence-circle {
+            font-size: 3rem;
+            font-weight: 800;
+            color: var(--accent);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1rem;
+        }
+        .stat-card {
+            background: rgba(255, 255, 255, 0.03);
+            padding: 1rem;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .stat-label { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 0.25rem; }
+        .stat-value { font-size: 1.25rem; font-weight: 600; font-family: 'JetBrains Mono'; }
+
+        /* --- Indicators Pane --- */
+        #signals-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1rem;
+        }
+        .signal-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+        .sig-val {
+            font-family: 'JetBrains Mono';
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-weight: 700;
+        }
+        .sig-pos { background: var(--success); color: black; }
+        .sig-neg { background: var(--danger); color: white; }
+        .sig-neu { background: rgba(255,255,255,0.1); color: var(--text-dim); }
+
+        .reasoning-box {
+            background: rgba(56, 189, 248, 0.05);
+            border-left: 4px solid var(--accent);
+            padding: 1rem;
+            font-style: italic;
+            line-height: 1.6;
+            font-size: 0.95rem;
+        }
+
+        /* --- Pulse Animation --- */
+        .loading-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+
+        /* Hide by default */
+        .hidden { display: none !important; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="logo">QUINTYX</div>
+        <div class="controls">
+            <input type="text" id="symbol-input" value="AAPL" placeholder="Symbol (e.g. AAPL, TSLA)">
+            <label style="font-size: 0.8rem; color: var(--text-dim)">
+                <input type="checkbox" id="network-check"> Network (LLM)
+            </label>
+            <button id="run-btn">RUN ANALYSIS</button>
+        </div>
+    </header>
+
+    <main>
+        <!-- Logs Pane -->
+        <section class="pane">
+            <div class="pane-header">Live Engine Logs <span id="log-status"></span></div>
+            <div id="logs-container">
+                <div style="color: grey">Ready. Click 'RUN ANALYSIS' to begin...</div>
+            </div>
+        </section>
+
+        <!-- Result Pane -->
+        <section class="pane">
+            <div class="pane-header">Prediction Result</div>
+            <div id="prediction-view" class="hidden">
+                <div class="hero-stat">
+                    <div id="res-action" class="action-badge">HOLD</div>
+                    <div class="stat-label">System Conviction</div>
+                    <div id="res-confidence" class="confidence-circle">0%</div>
+                </div>
+
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-label">Entry Price</div>
+                        <div id="res-entry" class="stat-value">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Stop Loss</div>
+                        <div id="res-stop" class="stat-value" style="color: var(--danger)">$0.00</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-label">Target</div>
+                        <div id="res-target" class="stat-value" style="color: var(--success)">$0.00</div>
+                    </div>
+                    <div class="stat-card" id="res-v-box">
+                        <div class="stat-label">Market Regime</div>
+                        <div id="res-regime" class="stat-value" style="font-size: 1rem; color: var(--accent)">UNKNOWN</div>
+                    </div>
+                </div>
+
+                <div>
+                    <div class="pane-header" style="background: none; padding-left: 0; margin-bottom: 0.5rem">AI Reasoning</div>
+                    <div id="res-reasoning" class="reasoning-box">...</div>
+                </div>
+            </div>
+            <div id="placeholder" style="flex: 1; display: flex; align-items: center; justify-content: center; color: var(--text-dim);">
+                Waiting for analysis...
+            </div>
+        </section>
+
+        <!-- Indicators Side Pane -->
+        <section class="pane">
+            <div class="pane-header">Strategy Signals</div>
+            <div id="signals-list">
+                <!-- Filled via JS -->
+            </div>
+            <div class="pane-header">Guardian Check</div>
+            <div id="guardian-box" style="padding: 1rem; font-size: 0.85rem; line-height: 1.5;">
+                <div id="res-guardian-status" style="font-weight: 700; margin-bottom: 0.5rem">--</div>
+                <div id="res-guardian-reason" style="color: var(--text-dim)">Risk audit waiting...</div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const runBtn = document.getElementById('run-btn');
+        const logsBox = document.getElementById('logs-container');
+        const symbolInput = document.getElementById('symbol-input');
+        const networkCheck = document.getElementById('network-check');
+
+        runBtn.addEventListener('click', () => {
+            const symbol = symbolInput.value || 'AAPL';
+            const useNetwork = networkCheck.checked;
+            
+            // UI Reset
+            logsBox.innerHTML = `<div style="color: var(--accent)">🚀 Initializing connection for ${symbol}...</div>`;
+            document.getElementById('prediction-view').classList.add('hidden');
+            document.getElementById('placeholder').classList.remove('hidden');
+            document.getElementById('signals-list').innerHTML = '';
+            runBtn.disabled = true;
+            runBtn.innerText = 'ANALYSING...';
+
+            const es = new EventSource(`/analyze?symbol=${symbol}&network=${useNetwork}`);
+
+            es.onmessage = (e) => {
+                const event = JSON.parse(e.data);
+
+                if (event.type === 'log') {
+                    const line = document.createElement('div');
+                    line.className = `log-line log-${event.level}`;
+                    line.innerText = event.message;
+                    logsBox.appendChild(line);
+                    logsBox.scrollTop = logsBox.scrollHeight;
+                } 
+                
+                else if (event.type === 'result') {
+                    displayResult(event.data);
+                }
+
+                else if (event.type === 'done' || event.type === 'error') {
+                    if (event.type === 'error') {
+                        logsBox.innerHTML += `<div class="log-ERROR">!!! ERROR: ${event.message}</div>`;
+                    }
+                    es.close();
+                    runBtn.disabled = false;
+                    runBtn.innerText = 'RUN ANALYSIS';
+                }
+            };
+
+            es.onerror = () => {
+                es.close();
+                runBtn.disabled = false;
+                runBtn.innerText = 'RUN ANALYSIS';
+            };
+        });
+
+        function displayResult(data) {
+            document.getElementById('prediction-view').classList.remove('hidden');
+            document.getElementById('placeholder').classList.add('hidden');
+
+            // Header stats
+            const actionEl = document.getElementById('res-action');
+            actionEl.innerText = data.action;
+            actionEl.className = `action-badge action-${data.action}`;
+            
+            document.getElementById('res-confidence').innerText = `${Math.round(data.confidence * 100)}%`;
+            
+            // Grid stats
+            const cur = data.symbol.includes(':') ? '' : '$'; // Simple currency detection
+            document.getElementById('res-entry').innerText = `${cur}${data.entry_price.toFixed(2)}`;
+            document.getElementById('res-stop').innerText = `${cur}${data.stop_loss.toFixed(2)}`;
+            document.getElementById('res-target').innerText = `${cur}${data.targets[0].toFixed(2)}`;
+            document.getElementById('res-regime').innerText = data.market_regime.toUpperCase().replace('_H', ' — H:');
+
+            // Reasoning
+            document.getElementById('res-reasoning').innerText = data.reasoning;
+
+            // Signals
+            const sigBox = document.getElementById('signals-list');
+            sigBox.innerHTML = '';
+            for (const [name, val] of Object.entries(data.strategy_signals)) {
+                const row = document.createElement('div');
+                row.className = 'signal-row';
+                const colorClass = val > 0 ? 'sig-pos' : val < 0 ? 'sig-neg' : 'sig-neu';
+                row.innerHTML = `
+                    <span>${name.charAt(0).toUpperCase() + name.slice(1)}</span>
+                    <span class="sig-val ${colorClass}">${val > 0 ? '+' : ''}${val}</span>
+                `;
+                sigBox.appendChild(row);
+            }
+
+            // Guardian
+            const gStatus = document.getElementById('res-guardian-status');
+            gStatus.innerText = data.guardian_status;
+            gStatus.style.color = data.guardian_status === 'APPROVED' ? 'var(--success)' : 'var(--danger)';
+            document.getElementById('res-guardian-reason').innerText = data.guardian_reason;
+        }
+    </script>
+</body>
+</html>
