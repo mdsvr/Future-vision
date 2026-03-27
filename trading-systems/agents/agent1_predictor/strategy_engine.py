@@ -53,9 +53,9 @@ def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
     # ── Signal 1: TREND ───────────────────────────────────────────────────────
     # Checks EMA 50 vs EMA 200 alignment (are short-term and long-term trends same?)
     # Best used in trending markets.
-    close   = latest['close']
-    ema_50  = latest['ema_50']
-    ema_200 = latest['ema_200']
+    close   = float(latest['close'])
+    ema_50  = float(latest['ema_50'])
+    ema_200 = float(latest['ema_200'])
 
     if close > ema_50 and ema_50 > ema_200:
         signals['trend'] = 1    # Perfect bull alignment: price > EMA50 > EMA200
@@ -89,8 +89,9 @@ def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
     macd_strength = macd_diff / denom              # Natural normalisation ~[-1, 1]
     macd_strength = max(-1.0, min(1.0, macd_strength * 2))  # Amplify + hard clamp
 
-    # Weighted combination: MACD (60%) + RSI (40%)
-    signals['momentum'] = round(0.6 * macd_strength + 0.4 * rsi_sig, 3)
+    # Weighted combination: MACD is more reliable for trend timing
+    # Cast to plain Python float to avoid np.float64 type leaking into the signals dict
+    signals['momentum'] = float(round(0.6 * macd_strength + 0.4 * rsi_sig, 2))
 
     # ── Signal 3: MEAN REVERSION (Bollinger Bands) ────────────────────────────
     # UPGRADED from a flat 2% EMA gap to Bollinger Band breakout detection.

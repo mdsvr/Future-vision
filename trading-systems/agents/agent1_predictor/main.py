@@ -27,7 +27,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
 with open(CONFIG_PATH, "r") as f:
     config = json.load(f)
 
-def run(symbol, mode="SAFE", allow_network=False):
+def run(symbol, mode="SAFE", allow_network=False, precomputed_df=None):
     """
     Orchestrates the full Agent 1 prediction cycle.
     1. Data Ingestion
@@ -45,31 +45,35 @@ def run(symbol, mode="SAFE", allow_network=False):
     llm_router = LLMRouter(provider=llm_provider, allow_network=allow_network)
     execution_agent = ExecutionAgent(allow_network=allow_network)
 
-    # --- Step 1: Market Data Gathering ---
-    if mode == "SAFE":
-        # SAFE mode: use yfinance with a short local-compatible pull (no --allow-network needed)
-        # We force allow_network=True just for data fetch in SAFE mode (yfinance only)
-        logger.info("[SAFE] Loading data using yfinance (read-only, no trades will execute).")
-        df = fetch_ohlcv(symbol)
-    elif not allow_network:
-        logger.error(f"[Safety] Network blocked for mode {mode}. Add --allow-network flag to proceed.")
-        return
+    if precomputed_df is not None:
+        logger.info(f"Using precomputed DataFrame for {symbol}.")
+        df = precomputed_df
     else:
-        df = fetch_ohlcv(symbol)
+        # --- Step 1: Market Data Gathering ---
+        if mode == "SAFE":
+            # SAFE mode: use yfinance with a short local-compatible pull (no --allow-network needed)
+            # We force allow_network=True just for data fetch in SAFE mode (yfinance only)
+            logger.info("[SAFE] Loading data using yfinance (read-only, no trades will execute).")
+            df = fetch_ohlcv(symbol)
+        elif not allow_network:
+            logger.error(f"[Safety] Network blocked for mode {mode}. Add --allow-network flag to proceed.")
+            return
+        else:
+            df = fetch_ohlcv(symbol)
 
-    if df is None:
-        logger.error("[Error] Aborting cycle: Market data fetch failed.")
-        return
+        if df is None:
+            logger.error("[Error] Aborting cycle: Market data fetch failed.")
+            return
 
-    # --- Step 2: Feature Engineering & Indicators ---
-    logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
-    df = compute_features(df)
+        # --- Step 2: Feature Engineering & Indicators ---
+        logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
+        df = compute_features(df)
 
-    # Guard: compute_features may return an empty DataFrame if the data is too short
-    # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
-    if df is None or len(df) == 0:
-        logger.error("[Error] Aborting cycle: DataFrame empty after feature computation. Not enough valid data.")
-        return None
+        # Guard: compute_features may return an empty DataFrame if the data is too short
+        # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
+        if df is None or len(df) == 0:
+            logger.error("[Error] Aborting cycle: DataFrame empty after feature computation. Not enough valid data.")
+            return None
 
     # --- Step 3: Intelligence & Regime Detection ---
     # Determine the current market 'vibe' (Trending vs Mean Reverting)
@@ -267,7 +271,7 @@ if __name__ == "__main__":
                 logger.error("[FastMode] Async pipeline returned no result. Aborting.")
                 sys.exit(1)
             # Re-enter the standard pipeline from Step 3 onwards
-            run(target_symbol, mode=args.mode, allow_network=args.allow_network)
+            run(target_symbol, mode=args.mode, allow_network=args.allow_network, precomputed_df=result.get("df"))
 
         asyncio.run(_fast_run())
     else:

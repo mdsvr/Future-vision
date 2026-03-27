@@ -3,14 +3,16 @@ regime.py  —  Market Regime Detector
 =====================================
 Figures out WHAT TYPE of market we're in right now.
 
-There are 3 types of markets:
-  1. TRENDING   — Price is moving consistently in one direction (up or down)
-  2. MEAN_REVERTING — Price keeps bouncing back to a central level (choppy)
-  3. RANDOM     — No clear pattern (noise, sideways drift)
+There are 4 types of markets:
+  1. VOLATILE   — ATR spike > 2× rolling mean (overrides Hurst)
+  2. TRENDING   — Price is moving consistently in one direction (up or down)
+  3. MEAN_REVERTING — Price keeps bouncing back to a central level (choppy)
+  4. RANDOM     — No clear pattern (noise, sideways drift)
 
 WHY does this matter?
+  - In a VOLATILE market  → Reduce position size or avoid trading
   - In a TRENDING market  → Follow the trend (BUY if going up, SELL if going down)
-  - In a MEAN REVERTING   → Fade the move (price will come back, so do the opposite)
+  - In a MEAN_REVERTING   → Fade the move (price will come back, so do the opposite)
   - In a RANDOM market    → Don't trade. The AI lowers its confidence.
 
 HOW we detect this: The Hurst Exponent
