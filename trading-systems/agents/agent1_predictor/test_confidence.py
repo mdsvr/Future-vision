@@ -1,7 +1,7 @@
 """
 test_confidence.py  —  Unit Tests for Enhanced Confidence Engine
 ================================================================
-Tests that the v2 confidence.py produces full dynamic range (0–100)
+Tests that the v2 confidence.py produces full dynamic range (0–1)
 and correctly applies regime and volatility adjustments.
 
 Run: python -m pytest test_confidence.py -v

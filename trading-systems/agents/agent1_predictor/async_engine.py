@@ -97,7 +97,12 @@ async def run_pipeline_async(symbol: str, executor: Optional[ThreadPoolExecutor]
         Returns None if data fetch or feature computation fails.
     """
     start = time.time()
-    loop  = asyncio.get_event_loop()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        
     own_executor = executor is None
     if own_executor:
         executor = ThreadPoolExecutor(max_workers=4)
@@ -125,7 +130,7 @@ async def run_pipeline_async(symbol: str, executor: Optional[ThreadPoolExecutor]
 
             _store_cached_features(symbol, df_features)
 
-        # ── Step 4: Regime detection + signal generation (fast, inline) ───────
+        # ── Step 4: Regime detection + signal generation (offloaded to executor/threadpool)
         regime, hurst, signals = await loop.run_in_executor(
             executor, _regime_signals_worker, df_features, symbol
         )

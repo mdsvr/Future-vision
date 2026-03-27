@@ -137,20 +137,20 @@ class TestBuildExplanation:
 
 class TestConclusion:
     def test_low_confidence_hold(self):
-        text = _build_conclusion(ALL_NEUTRAL, 0.30, "random")
+        text = _build_conclusion(ALL_NEUTRAL, 0.30)
         assert "HOLD" in text.upper()
 
     def test_bullish_alignment_buy(self):
-        text = _build_conclusion(ALL_BULLISH, 0.80, "trending")
+        text = _build_conclusion(ALL_BULLISH, 0.80)
         assert "BUY" in text.upper() or "bullish" in text.lower()
 
     def test_bearish_alignment_sell(self):
-        text = _build_conclusion(ALL_BEARISH, 0.80, "trending")
+        text = _build_conclusion(ALL_BEARISH, 0.80)
         assert "SELL" in text.upper() or "bearish" in text.lower()
 
     def test_mixed_signals_hold(self):
         mixed = {"trend": 1, "momentum": -1.0, "mean_reversion": 1, "volume": -1, "stoch_rsi": 0}
-        text  = _build_conclusion(mixed, 0.50, "random")
+        text  = _build_conclusion(mixed, 0.50)
         assert "HOLD" in text.upper() or "mixed" in text.lower()
 
 

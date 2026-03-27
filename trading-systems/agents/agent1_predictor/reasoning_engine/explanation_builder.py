@@ -222,9 +222,10 @@ def _classify_macd(macd_val: float, macd_sig_val: float) -> str:
 
 
 def _classify_volume(vol_signal: float) -> str:
+    eps = 1e-8
     if vol_signal >= 1:     return "strong_bullish"
-    if vol_signal > 0:      return "bullish"
-    if vol_signal == 0:     return "neutral"
+    if vol_signal > eps:    return "bullish"
+    if abs(vol_signal) <= eps: return "neutral"
     if vol_signal > -1:     return "bearish"
     return "strong_bearish"
 
@@ -252,7 +253,7 @@ def _classify_trend(trend_signal: int) -> str:
 
 # ── Conclusion Builder ─────────────────────────────────────────────────────────
 
-def _build_conclusion(signals: dict, confidence: float, regime: str) -> str:
+def _build_conclusion(signals: dict, confidence: float) -> str:
     """Synthesises a single-sentence conclusion from the overall signal picture."""
     direction_sum = sum(signals.values())
     bull_count    = sum(1 for v in signals.values() if v > 0)
@@ -351,6 +352,6 @@ def build_explanation(
     lines.append(vol_phrase)
 
     # 8. Synthesis conclusion
-    lines.append(_build_conclusion(signals, confidence, regime))
+    lines.append(_build_conclusion(signals, confidence))
 
     return " ".join(lines)

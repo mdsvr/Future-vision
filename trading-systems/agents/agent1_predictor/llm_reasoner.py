@@ -118,13 +118,11 @@ class LLMRouter:
         return response.choices[0].message.content.strip()
 
     def _openrouter_reasoning(self, symbol, regime, signals, confidence):
-        """Calls OpenRouter API using the standard OpenAI client schema."""
+        """Calls OpenRouter API using the standard OpenAI client schema.
+        Tries both OPENROUTER_API_KEY and OPENROUTER_API_KEY_2 for resilience.
+        """
         start_request_time = time.time()
-        client = OpenAI(
-            base_url="https://openrouter.ai/api/v1",
-            api_key=Config.OPENROUTER_API_KEY,
-        )
-        
+
         prompt = (
             f"Asset: {symbol}\n"
             f"Market Regime: {regime}\n"
@@ -136,32 +134,40 @@ class LLMRouter:
         )
 
         # Free models on OpenRouter (in preference order).
-        # If a model is deleted or unavailable (404), the next one is tried.
         FREE_MODELS = [
-            "google/gemma-3-27b-it:free",         # Google Gemma 3 27B (best free)
-            "deepseek/deepseek-r1:free",           # DeepSeek R1 reasoning model
-            "meta-llama/llama-3.1-8b-instruct:free", # Llama 3.1 8B (updated name)
-            "mistralai/mistral-7b-instruct:free",  # Mistral 7B (reliable fallback)
+            "google/gemma-3-27b-it:free",
+            "deepseek/deepseek-r1:free",
+            "meta-llama/llama-3.1-8b-instruct:free",
+            "mistralai/mistral-7b-instruct:free",
         ]
 
-        last_error = None
-        for model in FREE_MODELS:
-            try:
-                response = client.chat.completions.create(
-                    model=model,
-                    messages=[{"role": "user", "content": prompt}],
-                    temperature=0.3,
-                    max_tokens=150
-                )
-                latency = int((time.time() - start_request_time) * 1000)
-                logger.info(f"OpenRouter ({model}) reasoning generated in {latency}ms")
-                return response.choices[0].message.content.strip()
-            except Exception as e:
-                logger.warning(f"OpenRouter model {model} failed: {e}")
-                last_error = e
-                continue
+        # Try both API keys for maximum resilience
+        api_keys = [k for k in [Config.OPENROUTER_API_KEY,
+                                 getattr(Config, "OPENROUTER_API_KEY_2", None)] if k]
 
-        # All models failed — raise the last error to trigger the outer cascade
+        last_error = None
+        for api_key in api_keys:
+            client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+            )
+            for model in FREE_MODELS:
+                try:
+                    response = client.chat.completions.create(
+                        model=model,
+                        messages=[{"role": "user", "content": prompt}],
+                        temperature=0.3,
+                        max_tokens=150
+                    )
+                    latency = int((time.time() - start_request_time) * 1000)
+                    logger.info(f"OpenRouter ({model}) reasoning generated in {latency}ms")
+                    return response.choices[0].message.content.strip()
+                except Exception as e:
+                    logger.warning(f"OpenRouter model {model} failed: {e}")
+                    last_error = e
+                    continue
+
+        # All keys + models failed — raise to trigger the outer cascade
         raise Exception(f"All OpenRouter free models failed. Last error: {last_error}")
 
     def _gemini_reasoning(self, symbol, regime, signals, confidence, atr_percentile):
@@ -219,7 +225,7 @@ class LLMRouter:
             except Exception as e:
                 logger.warning(f"explanation_builder failed: {e}. Falling back to minimal summary.")
 
-        # ── Minimal summaryfall back (no indicator values available) ──────────
+        # ── Minimal summary fallback (no indicator values available) ──────────
         signal_summary = ", ".join([f"{k}: {v}" for k, v in signals.items()])
         vol_label = (
             "extreme" if atr_percentile > 0.9
