@@ -37,7 +37,7 @@
     "fallback_to_deterministic": true
   },
   "data": {
-    "symbol": "AAPL",
+    "symbol": "BSE:SENSEX-INDEX",
     "interval": "15m",
     "period": "15d",
     "market_data_provider": "yfinance"

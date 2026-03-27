@@ -27,7 +27,7 @@ import json
 import os
 
 # ── Load config ────────────────────────────────────────────────────────────────
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
 with open(_CONFIG_PATH, "r") as f:
     _raw  = json.load(f)
     _cfg  = _raw["indicators"]

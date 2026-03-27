@@ -9,14 +9,14 @@ from datetime import datetime, timezone
 
 # --- Internal Module Imports ---
 from logger import get_logger
-from data_ingestion import fetch_ohlcv
-from feature_engine import compute_features
-from strategy_engine import generate_signals
-from confidence import compute_confidence
-from regime import classify_regime
+from data_layer.live_market_feed import fetch_ohlcv
+from indicator_engine.feature_engine import compute_features
+from fusion_engine.strategy_engine import generate_signals
+from fusion_engine.confidence import compute_confidence
+from fusion_engine.regime import classify_regime
 from validator import validate_prediction
 from guardian import run_guardian_checks
-from llm_reasoner import LLMRouter
+from reasoning_engine.llm_reasoner import LLMRouter
 from execution_agent import ExecutionAgent
 
 # Setup logger for the main process
@@ -54,26 +54,26 @@ def run(symbol, mode="SAFE", allow_network=False, precomputed_df=None):
             # SAFE mode: use yfinance with a short local-compatible pull (no --allow-network needed)
             # We force allow_network=True just for data fetch in SAFE mode (yfinance only)
             logger.info("[SAFE] Loading data using yfinance (read-only, no trades will execute).")
-            df = fetch_ohlcv(symbol)
+            df = asyncio.run(fetch_ohlcv(symbol))
         elif not allow_network:
             logger.error(f"[Safety] Network blocked for mode {mode}. Add --allow-network flag to proceed.")
             return
         else:
-            df = fetch_ohlcv(symbol)
+            df = asyncio.run(fetch_ohlcv(symbol))
 
         if df is None:
             logger.error("[Error] Aborting cycle: Market data fetch failed.")
             return
 
-        # --- Step 2: Feature Engineering & Indicators ---
-        logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
-        df = compute_features(df)
+    # --- Step 2: Feature Engineering & Indicators ---
+    logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
+    df = compute_features(df)
 
-        # Guard: compute_features may return an empty DataFrame if the data is too short
-        # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
-        if df is None or len(df) == 0:
-            logger.error("[Error] Aborting cycle: DataFrame empty after feature computation. Not enough valid data.")
-            return None
+    # Guard: compute_features may return an empty DataFrame if the data is too short
+    # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
+    if df is None or len(df) == 0:
+        logger.error("[Error] Aborting cycle: DataFrame empty after feature computation. Not enough valid data.")
+        return None
 
     # --- Step 3: Intelligence & Regime Detection ---
     # Determine the current market 'vibe' (Trending vs Mean Reverting)

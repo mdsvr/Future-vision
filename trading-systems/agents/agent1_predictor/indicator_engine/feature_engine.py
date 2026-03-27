@@ -32,7 +32,7 @@ import json
 import os
 
 # ── Load indicator periods from config.json ────────────────────────────────
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
 with open(_CONFIG_PATH, "r") as f:
     _cfg = json.load(f)["indicators"]
 
