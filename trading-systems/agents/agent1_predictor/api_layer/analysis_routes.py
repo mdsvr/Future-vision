@@ -1,13 +1,14 @@
-import asyncio
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 import sys
 import os
+import asyncio
 
 from logger import get_logger
 logger = get_logger()
 
 from data_layer.live_market_feed import fetch_ohlcv
+from data_layer.websocket_client import MarketStreamer
 from main import run as agent_pipeline
 
 router = APIRouter()
@@ -70,3 +71,45 @@ async def analyze_stock(
         raise HTTPException(status_code=500, detail="Agent pipeline failed to produce a valid prediction.")
 
     return result
+
+@router.websocket("/ws/market_data/{symbol}")
+async def websocket_market_data(websocket: WebSocket, symbol: str):
+    """
+    Phase 5: WebSocket Streaming Endpoint.
+    Connects to the MarketStreamer which automatically pushes tick updates.
+    Runs the agent pipeline on every tick update and pushes JSON to the frontend.
+    """
+    await websocket.accept()
+    logger.info(f"Frontend WebSocket client connected for {symbol} stream.")
+    
+    streamer = MarketStreamer(symbol)
+    
+    # Run the stream indefinitely until client disconnects
+    try:
+        # `streamer.stream()` yields an updated DataFrame every 2 seconds (or physical tick)
+        async for live_df in streamer.stream():
+            try:
+                # Dispatch the heavy pipeline locally
+                result = await asyncio.to_thread(
+                    agent_pipeline,
+                    symbol=symbol,
+                    mode="SAFE",
+                    allow_network=True,
+                    precomputed_df=live_df
+                )
+                
+                # Push the analysis back to the React UI immediately
+                if result:
+                    await websocket.send_json(result)
+            except Exception as e:
+                logger.error(f"[WebSocket] Internal Pipeline Error: {e}")
+                await websocket.send_json({"error": "Internal Pipeline Error", "detail": str(e)})
+
+    except WebSocketDisconnect:
+        logger.info(f"Frontend WebSocket client disconnected from {symbol} stream.")
+    except Exception as e:
+        logger.error(f"[WebSocket] Connection dropped ungracefully: {e}")
+        try:
+            await websocket.close()
+        except:
+            pass

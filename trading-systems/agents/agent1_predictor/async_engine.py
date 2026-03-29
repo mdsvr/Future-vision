@@ -67,10 +67,7 @@ def _fetch_worker(symbol: str):
     return fetch_ohlcv(symbol)
 
 
-def _features_worker(df):
-    """Synchronous feature computation — runs in thread pool."""
-    from feature_engine import compute_features
-    return compute_features(df)
+# Note: feature computation has been fully parallelized natively and does not require a simple worker.
 
 
 def _regime_signals_worker(df, symbol: str):
@@ -120,9 +117,10 @@ async def run_pipeline_async(symbol: str, executor: Optional[ThreadPoolExecutor]
                 logger.error(f"[AsyncEngine] Data fetch failed for {symbol}")
                 return None
 
-            # ── Step 3: Compute features (async, thread pool) ─────────────────
+            # ── Step 3: Compute features (async, fully parallelized) ──────────
             logger.info(f"[AsyncEngine] Computing features for {symbol}...")
-            df_features = await loop.run_in_executor(executor, _features_worker, df_raw)
+            from indicator_engine.feature_engine import compute_features_async
+            df_features = await compute_features_async(df_raw, executor=executor)
 
             if df_features is None or len(df_features) == 0:
                 logger.error(f"[AsyncEngine] Feature computation failed for {symbol}")

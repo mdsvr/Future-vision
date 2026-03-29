@@ -1,0 +1,40 @@
+interactive rebase in progress; onto 12445d4
+Last command done (1 command done):
+   pick c24d47d # feat: phase 3 and 6 architecture upgrades (FastAPI + Async + Redis)
+Next command to do (1 remaining command):
+   pick 5788250 # fix(agent1): Resolve static analysis warnings, add math guards and LLM timeouts
+  (use "git rebase --edit-todo" to view and edit)
+You are currently rebasing branch 'main' on '12445d4'.
+  (all conflicts fixed: run "git rebase --continue")
+
+Changes to be committed:
+  (use "git restore --staged <file>..." to unstage)
+	new file:   api_layer/__init__.py
+	new file:   api_layer/analysis_routes.py
+	new file:   api_layer/server.py
+	new file:   cache_layer/__init__.py
+	new file:   cache_layer/redis_manager.py
+	modified:   config.json
+	deleted:    data_ingestion.py
+	new file:   data_layer/__init__.py
+	new file:   data_layer/live_market_feed.py
+	modified:   fusion_engine/__init__.py
+	renamed:    confidence.py -> fusion_engine/confidence.py
+	renamed:    regime.py -> fusion_engine/regime.py
+	renamed:    strategy_engine.py -> fusion_engine/strategy_engine.py
+	modified:   indicator_engine/__init__.py
+	renamed:    feature_engine.py -> indicator_engine/feature_engine.py
+	renamed:    indicators.py -> indicator_engine/indicators.py
+	modified:   main.py
+	modified:   reasoning_engine/__init__.py
+	renamed:    llm_reasoner.py -> reasoning_engine/llm_reasoner.py
+
+Changes not staged for commit:
+  (use "git add <file>..." to update what will be committed)
+  (use "git restore <file>..." to discard changes in working directory)
+	modified:   test_confidence.py
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+	status.txt
+

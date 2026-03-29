@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Agent 1: Live Market Stream</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #0f172a; color: #f8fafc; padding: 2rem; }
+        .dashboard { max-width: 1000px; margin: 0 auto; display: grid; gap: 1rem; }
+        .card { background: #1e293b; border-radius: 12px; padding: 1.5rem; box-shadow: 0 4px 6px rgba(0,0,0,0.3); }
+        .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 1rem; margin-bottom: 1rem; }
+        .status { padding: 4px 12px; border-radius: 99px; font-weight: bold; font-size: 0.85rem; }
+        .status.connected { background: #10b981; color: white; }
+        .status.disconnected { background: #ef4444; color: white; }
+        .value-large { font-size: 2.5rem; font-weight: 700; margin: 0.5rem 0; }
+        .badge { display: inline-block; padding: 4px 12px; border-radius: 6px; font-weight: bold; }
+        .badge-buy { background: #059669; }
+        .badge-sell { background: #dc2626; }
+        .badge-hold { background: #475569; }
+        pre { background: #0f172a; padding: 1rem; border-radius: 8px; overflow-x: auto; color: #a5b4fc; }
+        .pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: .5; } }
+    </style>
+</head>
+<body>
+    <div class="dashboard">
+        <div class="card">
+            <div class="header">
+                <h2>Live Agent 1 Feed (BSE:SENSEX-INDEX)</h2>
+                <div id="connection-status" class="status disconnected">DISCONNECTED</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 2rem;">
+                <div>
+                    <h3 style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Real-Time Action</h3>
+                    <div id="action-badge" class="badge badge-hold">AWAITING SIGNAL</div>
+                    <div id="confidence-val" class="value-large">0.0%</div>
+                    <p style="color: #94a3b8;">Conviction Score</p>
+                </div>
+                <div>
+                    <h3 style="color: #94a3b8; font-size: 0.9rem; text-transform: uppercase;">Guardian Verification</h3>
+                    <div class="pulse" style="font-size: 1.25rem; font-weight: bold; color: #eab308;" id="guardian-status">Processing updates...</div>
+                    <p style="margin-top: 10px; color: #cbd5e1" id="regime-status">Regime: Calculating...</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="card">
+            <h3>LLM Narrative Reasoning (Streaming)</h3>
+            <p id="reasoning-text" style="line-height: 1.6; font-size: 1.1rem; color: #cbd5e1;">Awaiting data stream to generate reasoning...</p>
+        </div>
+
+        <div class="card">
+            <h3 style="font-size: 0.9rem; color: #94a3b8;">Raw JSON Prediction Payload</h3>
+            <pre><code id="json-output">...</code></pre>
+        </div>
+    </div>
+
+    <script>
+        const SYMBOL = "BSE:SENSEX-INDEX";
+        const WS_URL = `ws://localhost:8000/api/v1/ws/market_data/${SYMBOL}`;
+        
+        let ws;
+
+        function connect() {
+            ws = new WebSocket(WS_URL);
+            const statusEl = document.getElementById("connection-status");
+
+            ws.onopen = () => {
+                statusEl.textContent = "CONNECTED (LIVE)";
+                statusEl.className = "status connected pulse";
+            };
+
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                
+                // Update Badge Action
+                const actionBadge = document.getElementById("action-badge");
+                actionBadge.textContent = data.action;
+                actionBadge.className = `badge badge-${data.action.toLowerCase()}`;
+
+                // Update Confidence
+                document.getElementById("confidence-val").textContent = (data.confidence * 100).toFixed(1) + "%";
+
+                // Update Details
+                document.getElementById("guardian-status").textContent = `Gatekeeper: ${data.guardian_status}`;
+                document.getElementById("regime-status").textContent = `Active Regime: ${data.market_regime}`;
+
+                // Update LLM Narrative
+                if(data.reasoning) {
+                    document.getElementById("reasoning-text").textContent = data.reasoning;
+                }
+
+                // Dump structured JSON payload
+                document.getElementById("json-output").textContent = JSON.stringify(data, null, 2);
+            };
+
+            ws.onclose = () => {
+                statusEl.textContent = "DISCONNECTED";
+                statusEl.className = "status disconnected";
+                setTimeout(connect, 3000); // Auto-reconnect
+            };
+            
+            ws.onerror = (err) => {
+                console.error("Live Stream Error: ", err);
+            }
+        }
+
+        connect();
+    </script>
+</body>
+</html>

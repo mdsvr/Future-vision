@@ -45,137 +45,115 @@ def _load_config():
 _cfg = _load_config()
 
 
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
+
+# Make sure we use absolute import or explicit relative import to grab pure functions
+# Assuming indicators.py is side-by-side with feature_engine.py
+from . import indicators
+
 def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     """
-    Enriches a raw OHLCV DataFrame with all technical indicators.
+    Synchronous wrapper for compute_features_async.
+    Used by components that still rely on sequential/blocking patterns (like safe mode).
+    Will initialize a ThreadPoolExecutor implicitly.
+    """
+    return asyncio.run(compute_features_async(df))
+
+async def compute_features_async(df: pd.DataFrame, executor: ThreadPoolExecutor = None) -> pd.DataFrame:
+    """
+    Enriches a raw OHLCV DataFrame with all technical indicators asynchronously.
+    Dispatches disjoint groups of indicators to thread pool workers.
 
     Args:
         df (DataFrame): Raw price data with columns: open, high, low, close, volume
+        executor: Optional shared ThreadPoolExecutor.
 
     Returns:
         DataFrame: Same data plus indicator columns. First N rows (warm-up period) dropped.
     """
     df = df.copy()
 
-    # ── TREND INDICATORS ──────────────────────────────────────────────────────
+    def calc_trend():
+        ema200 = indicators.ema(df['close'], _cfg.get("ema_slow", 200))
+        ema50  = indicators.ema(df['close'], _cfg.get("ema_fast", 50))
+        return {'ema_200': ema200, 'ema_50': ema50}
 
-    # EMA 200 — Long-term trend (Golden/Death Cross framework)
-    # Price above EMA200 = overall bullish market; below = bearish
-    df['ema_200'] = df['close'].ewm(span=_cfg["ema_slow"]).mean()
+    def calc_momentum():
+        rsi_s = indicators.rsi(df['close'], _cfg.get("rsi_period", 14))
+        # StochRSI needs the raw RSI passed, but since it's a pure function wrapper in indicators.py,
+        # it calls rsi() again internally (or we handle it directly if we want)
+        stoch_rsi_s = indicators.stochastic_rsi(df['close'], _cfg.get("stoch_rsi_period", 14))
+        macd_d = indicators.macd(df['close'], _cfg.get("macd_fast", 12), _cfg.get("macd_slow", 26), _cfg.get("macd_signal", 9))
+        return {
+            'rsi': rsi_s,
+            'stoch_rsi': stoch_rsi_s,
+            'macd': macd_d['macd'],
+            'macd_signal': macd_d['signal']
+        }
 
-    # EMA 50 — Medium-term trend
-    # EMA50 crossing EMA200 upward = "Golden Cross" (strong buy signal)
-    # EMA50 crossing EMA200 downward = "Death Cross" (strong sell signal)
-    df['ema_50']  = df['close'].ewm(span=_cfg["ema_fast"]).mean()
+    def calc_volatility():
+        bb_d = indicators.bollinger_bands(df['close'], _cfg.get("bollinger_period", 20), _cfg.get("bollinger_std", 2))
+        atr_s = indicators.atr(df['high'], df['low'], df['close'], _cfg.get("atr_period", 14))
+        return {
+            'bb_upper': bb_d['upper'], 'bb_lower': bb_d['lower'],
+            'bb_mid': bb_d['mid'], 'bb_width': bb_d['width'],
+            'atr': atr_s
+        }
 
-    # ── MOMENTUM INDICATORS ───────────────────────────────────────────────────
+    def calc_volume():
+        obv_s = indicators.obv(df['close'], df['volume'])
+        obv_slope_s = indicators.obv_slope(obv_s, _cfg.get("obv_slope_period", 5))
+        
+        vol_avg = df['volume'].rolling(_cfg.get("obv_volume_avg_period", 20)).mean()
+        vol_spike = df['volume'] > (_cfg.get("obv_volume_spike_multiplier", 1.5) * vol_avg)
+        
+        return {'obv': obv_s, 'obv_slope': obv_slope_s, 'volume_avg': vol_avg, 'volume_spike': vol_spike}
 
-    # RSI — Relative Strength Index (0–100)
-    # >70: Overbought (likely to pull back)   <30: Oversold (likely to bounce)
-    delta = df['close'].diff()
-    gain  = delta.clip(lower=0).rolling(_cfg["rsi_period"]).mean()
-    loss  = (-delta.clip(upper=0)).rolling(_cfg["rsi_period"]).mean()
-    rs    = gain / (loss + 1e-9)
-    df['rsi'] = 100 - (100 / (1 + rs))
+    def calc_vwap():
+        if df.empty or df['volume'].size == 0:
+            return {'vwap': df.get('close', pd.Series(dtype=float))}
+            
+        cumvol_last = df['volume'].cumsum().iloc[-1]
+        if cumvol_last == 0:
+            return {'vwap': df['close']}
+            
+        return {'vwap': indicators.vwap(df['high'], df['low'], df['close'], df['volume'])}
 
-    # Stochastic RSI — applies RSI formula TO the RSI values
-    # More sensitive than plain RSI — catches reversals before they appear in raw RSI
-    # StochRSI near 1.0 = extremely overbought; near 0.0 = extremely oversold
-    rsi_min = df['rsi'].rolling(_cfg["stoch_rsi_period"]).min()
-    rsi_max = df['rsi'].rolling(_cfg["stoch_rsi_period"]).max()
-    rsi_range = rsi_max - rsi_min
-    df['stoch_rsi'] = (df['rsi'] - rsi_min) / (rsi_range + 1e-9)
+    # Get event loop to dispatch to executor
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
 
-    # MACD — Moving Average Convergence Divergence
-    # MACD line crossing above signal = bullish; below = bearish
-    ema_fast         = df['close'].ewm(span=_cfg["macd_fast"]).mean()
-    ema_slow         = df['close'].ewm(span=_cfg["macd_slow"]).mean()
-    df['macd']        = ema_fast - ema_slow
-    df['macd_signal'] = df['macd'].ewm(span=_cfg["macd_signal"]).mean()
+    # Launch in parallel
+    task_results = await asyncio.gather(
+        loop.run_in_executor(executor, calc_trend),
+        loop.run_in_executor(executor, calc_momentum),
+        loop.run_in_executor(executor, calc_volatility),
+        loop.run_in_executor(executor, calc_volume),
+        loop.run_in_executor(executor, calc_vwap)
+    )
 
-    # ── MEAN REVERSION — BOLLINGER BANDS ─────────────────────────────────────
-    # Bollinger Bands create a volatility envelope around price.
-    # Upper Band = SMA + (2 × standard deviation of price)
-    # Lower Band = SMA − (2 × standard deviation of price)
-    #
-    # Price ABOVE upper band → overextended (likely to fall back) →  SELL signal
-    # Price BELOW lower band → oversold (likely to bounce up)    →  BUY signal
-    # Price inside bands     → normal range, no reversal signal
-    #
-    # Bollinger Width (how wide the bands are) measures volatility compression.
-    # A very narrow "squeeze" often precedes a big breakout move.
-    bb_period = _cfg["bollinger_period"]
-    bb_std    = _cfg["bollinger_std"]
-    bb_sma    = df['close'].rolling(bb_period).mean()
-    bb_sigma  = df['close'].rolling(bb_period).std()
-    df['bb_upper'] = bb_sma + bb_std * bb_sigma
-    df['bb_lower'] = bb_sma - bb_std * bb_sigma
-    df['bb_mid']   = bb_sma
-    df['bb_width'] = (df['bb_upper'] - df['bb_lower']) / (bb_sma + 1e-9)  # Normalized width
+    # Merge results
+    for res_dict in task_results:
+        for col_name, series in res_dict.items():
+            df[col_name] = series
 
-    # ── VOLUME INDICATORS ─────────────────────────────────────────────────────
-
-    # OBV — On-Balance Volume
-    # Cumulative volume flow: +volume when price goes up, -volume when price goes down
-    # Rising OBV + rising price = strong uptrend (institutional buyers accumulating)
-    # Falling OBV + rising price = warning sign (distribution — smart money selling)
-    df['obv'] = (np.sign(df['close'].diff()) * df['volume']).fillna(0).cumsum()
-
-    # OBV Slope — is volume flow accelerating up or down over last N candles?
-    # Used in strategy_engine to confirm trend with volume
-    slope_period = _cfg.get("obv_slope_period", 5)
-    df['obv_slope'] = df['obv'].diff(slope_period)  # Positive = rising OBV, Negative = falling
-
-    # Volume Spike — sudden surge above average signals institutional interest
-    df['volume_avg']   = df['volume'].rolling(_cfg["obv_volume_avg_period"]).mean()
-    df['volume_spike'] = df['volume'] > _cfg["obv_volume_spike_multiplier"] * df['volume_avg']
-
-    # ── VOLATILITY — ATR ──────────────────────────────────────────────────────
-
-    # ATR — Average True Range: average size of price swings per candle
-    # High ATR → volatile → set wider stops ; Low ATR → quiet → tighter stops
-    tr1 = df['high'] - df['low']
-    tr2 = abs(df['high'] - df['close'].shift())
-    tr3 = abs(df['low']  - df['close'].shift())
-    tr_series  = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    df['atr'] = tr_series.rolling(_cfg.get("atr_period", 14)).mean()
-
-    # ── VOLUME WEIGHTED AVERAGE PRICE (VWAP) ─────────────────────────────────
-    # VWAP = best intraday "fair value" benchmark used by institutional traders.
-    # Price above VWAP = buyers in control (bullish bias)
-    # Price below VWAP = sellers in control (bearish bias)
-    #
-    # For intraday candles: cumulative sum of (typical price × volume) / cumulative volume
-    # Typical price = (high + low + close) / 3
-    #
-    # NOTE: For INDEX symbols (VIX, NIFTY50 etc.), volume is always 0.
-    # To avoid NaN from 0/0, we fall back to using the close price as VWAP.
-    if df.empty or df['volume'].size == 0:
-        df['vwap'] = df.get('close', np.nan)
-        return df
-
-    tp = (df['high'] + df['low'] + df['close']) / 3   # Typical price per candle
-    cumvol = df['volume'].cumsum()
-    if cumvol.iloc[-1] == 0:
-        # Zero-volume index: VWAP is meaningless — use close as a proxy
-        df['vwap'] = df['close']
-    else:
-        df['vwap'] = (tp * df['volume']).cumsum() / cumvol.replace(0, float('nan'))
-        df['vwap'] = df['vwap'].ffill()  # Forward-fill any gaps from partial zero-volume candles
-
-    # Drop warm-up rows using only the core trend indicators as the NaN gate.
-    # We do NOT use df.dropna() on all columns because:
-    #   - Index symbols have volume=0 → OBV/volume_spike cols may stay NaN all rows
-    #   - We only need EMA, RSI, MACD, BB, ATR to be ready before we can analyse
-    core_cols = ['ema_200', 'ema_50', 'rsi', 'macd', 'macd_signal',
-                 'bb_upper', 'bb_lower', 'atr']
+    # Drop warm-up rows
+    core_cols = ['ema_200', 'ema_50', 'rsi', 'macd', 'macd_signal', 'bb_upper', 'bb_lower', 'atr']
     df = df.dropna(subset=core_cols)
 
     # Fill any remaining NaN in optional cols with safe neutral values
-    df['stoch_rsi']    = df['stoch_rsi'].fillna(0.5)    # Neutral StochRSI
-    df['obv_slope']    = df['obv_slope'].fillna(0)       # Flat OBV slope
+    df['stoch_rsi']    = df['stoch_rsi'].fillna(0.5)
+    df['obv_slope']    = df['obv_slope'].fillna(0)
     df['volume_avg']   = df['volume_avg'].fillna(0)
     df['volume_spike'] = df['volume_spike'].fillna(False)
-    df['vwap']         = df['vwap'].fillna(df['close'])  # VWAP fallback to close
+    
+    if 'vwap' in df:
+        df['vwap'] = df['vwap'].fillna(df['close'])
+    else:
+        df['vwap'] = df['close']
 
     return df

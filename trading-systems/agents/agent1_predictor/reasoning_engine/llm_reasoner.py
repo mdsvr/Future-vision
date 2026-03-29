@@ -196,8 +196,7 @@ class LLMRouter:
         try:
             response = client.models.generate_content(
                 model="gemini-2.0-flash",
-                contents=prompt,
-                config={"timeout": 15.0}
+                contents=prompt
             )
             latency = int((time.time() - start_request_time) * 1000)
             
