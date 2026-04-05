@@ -105,6 +105,8 @@ def classify_regime(df):
         regime, hurst = classify_regime(df)
         # regime = "trending", hurst = 0.62
     """
+    if 'close' not in df.columns:
+        raise ValueError("classify_regime requires a DataFrame with a 'close' column.")
     close_series = df['close'].values
     hurst = calculate_hurst_exponent(close_series)
 

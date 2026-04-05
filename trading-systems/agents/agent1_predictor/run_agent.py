@@ -484,8 +484,8 @@ def main():
     # For India: Fyers token is required — no fallback
     if market == "INDIA":
         from dotenv import load_dotenv
-        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
-        token = os.getenv("FYERS_ACCESS_TOKEN", "")
+        load_dotenv(os.path.join(os.path.dirname(__file__), ".env"), override=True)
+        token = os.getenv("FYERS_ACCESS_TOKEN", "").strip("'\"")
         if not token or token == "your_fyers_access_token":
             print()
             print(RED + BOLD + "  ! Fyers Login Required for Indian Stocks" + RESET)

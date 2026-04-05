@@ -89,6 +89,8 @@ if resp.get("s") != "ok":
     sys.exit(1)
 
 token = resp["access_token"]
+# Strip potential surrounding quotes the user's terminal might add
+token = token.strip("'\"") 
 set_key(ENV_PATH, "FYERS_ACCESS_TOKEN", token)
 
 # ── Verify ────────────────────────────────────────────

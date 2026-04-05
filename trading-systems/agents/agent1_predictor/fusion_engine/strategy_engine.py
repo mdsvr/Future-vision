@@ -27,11 +27,18 @@ import json
 import os
 
 # ── Load config ────────────────────────────────────────────────────────────────
-_CONFIG_PATH = os.path.join(os.path.dirname(__file__), "config.json")
-with open(_CONFIG_PATH, "r") as f:
-    _raw  = json.load(f)
-    _cfg  = _raw["indicators"]
-    _risk = _raw["risk"]
+_CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+def _load_config():
+    try:
+        with open(_CONFIG_PATH, "r") as f:
+            _raw = json.load(f)
+            return _raw.get("indicators", {}), _raw.get("risk", {})
+    except (FileNotFoundError, json.JSONDecodeError, KeyError) as e:
+        import logging
+        logging.getLogger(__name__).error(f"Failed to load config: {e}")
+        return {}, {}
+
+_cfg, _risk = _load_config()
 
 
 def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
@@ -47,51 +54,55 @@ def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
               {"trend": 1, "momentum": 0.6, "mean_reversion": 0,
                "volume": 1, "stoch_rsi": -1}
     """
+    if df.empty or len(df) == 0:
+        return {}
+    
     latest = df.iloc[-1]   # Only need the most recent candle
     signals = {}
 
     # ── Signal 1: TREND ───────────────────────────────────────────────────────
     # Checks EMA 50 vs EMA 200 alignment (are short-term and long-term trends same?)
     # Best used in trending markets.
-    close   = float(latest['close'])
-    ema_50  = float(latest['ema_50'])
-    ema_200 = float(latest['ema_200'])
+    close   = latest.get('close')
+    ema_50  = latest.get('ema_50')
+    ema_200 = latest.get('ema_200')
 
-    if close > ema_50 and ema_50 > ema_200:
-        signals['trend'] = 1    # Perfect bull alignment: price > EMA50 > EMA200
-    elif close < ema_50 and ema_50 < ema_200:
-        signals['trend'] = -1   # Perfect bear alignment: price < EMA50 < EMA200
+    if None in (close, ema_50, ema_200) or pd.isna(close) or pd.isna(ema_50) or pd.isna(ema_200):
+        signals['trend'] = 0
     else:
-        signals['trend'] = 0    # EMAs crossing or mixed — no clear trend
+        close, ema_50, ema_200 = float(close), float(ema_50), float(ema_200)
+        if close > ema_50 and ema_50 > ema_200:
+            signals['trend'] = 1    # Perfect bull alignment: price > EMA50 > EMA200
+        elif close < ema_50 and ema_50 < ema_200:
+            signals['trend'] = -1   # Perfect bear alignment: price < EMA50 < EMA200
+        else:
+            signals['trend'] = 0    # EMAs crossing or mixed — no clear trend
 
     # ── Signal 2: MOMENTUM ────────────────────────────────────────────────────
     # Combines MACD crossover (60%) and RSI level (40%).
     # MACD measures speed/direction of trend; RSI measures overbought/oversold.
-    rsi        = latest['rsi']
-    macd       = latest['macd']
-    macd_sig   = latest['macd_signal']
+    rsi        = latest.get('rsi')
+    macd       = latest.get('macd')
+    macd_sig   = latest.get('macd_signal')
 
-    # RSI component: graded signal based on distance from neutral (50)
-    if rsi > _cfg.get("rsi_upper", 70):
-        rsi_sig = -1                              # Overbought: likely pullback
-    elif rsi < _cfg.get("rsi_lower", 30):
-        rsi_sig = 1                               # Oversold: likely bounce
+    if None in (rsi, macd, macd_sig) or pd.isna(rsi) or pd.isna(macd) or pd.isna(macd_sig):
+        signals['momentum'] = 0
     else:
-        # Continuous: slight bullish/bearish lean based on RSI position in 30–70 band
-        rsi_sig = round((rsi - 50) / -50, 2)     # RSI 60 → -0.2; RSI 40 → +0.2
-        rsi_sig = max(-0.5, min(0.5, rsi_sig))   # Clamp: neutral band caps at ±0.5
+        # RSI component: graded signal based on distance from neutral (50)
+        if rsi > _cfg.get("rsi_upper", 70):
+            rsi_sig = -1                              
+        elif rsi < _cfg.get("rsi_lower", 30):
+            rsi_sig = 1                               
+        else:
+            rsi_sig = round((rsi - 50) / -50, 2)     
+            rsi_sig = max(-0.5, min(0.5, rsi_sig))   
 
-    # MACD component — continuous proportional strength instead of binary crossover.
-    # Measures how far MACD is from its signal line relative to signal line magnitude.
-    # A large divergence → strong conviction; near-equal → flat momentum.
-    macd_diff  = macd - macd_sig
-    denom      = abs(macd_sig) + abs(macd) + 1e-9
-    macd_strength = macd_diff / denom              # Natural normalisation ~[-1, 1]
-    macd_strength = max(-1.0, min(1.0, macd_strength * 2))  # Amplify + hard clamp
+        macd_diff  = macd - macd_sig
+        denom      = abs(macd_sig) + abs(macd) + 1e-9
+        macd_strength = macd_diff / denom              
+        macd_strength = max(-1.0, min(1.0, macd_strength * 2))  
 
-    # Weighted combination: MACD is more reliable for trend timing
-    # Cast to plain Python float to avoid np.float64 type leaking into the signals dict
-    signals['momentum'] = float(round(0.6 * macd_strength + 0.4 * rsi_sig, 2))
+        signals['momentum'] = float(round(0.6 * macd_strength + 0.4 * rsi_sig, 2))
 
     # ── Signal 3: MEAN REVERSION (Bollinger Bands) ────────────────────────────
     # UPGRADED from a flat 2% EMA gap to Bollinger Band breakout detection.

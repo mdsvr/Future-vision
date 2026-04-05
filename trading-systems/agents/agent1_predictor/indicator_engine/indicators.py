@@ -72,7 +72,10 @@ def vwap(high: pd.Series, low: pd.Series, close: pd.Series, volume: pd.Series) -
         df['vwap'] = vwap(df['high'], df['low'], df['close'], df['volume'])
     """
     typical_price = (high + low + close) / 3
-    return (typical_price * volume).cumsum() / volume.cumsum()
+    cum_vol = volume.cumsum()
+    safe_cum_vol = cum_vol.replace(0, float('nan'))
+    vwap_series = (typical_price * volume).cumsum() / safe_cum_vol
+    return vwap_series.fillna(0)
 
 
 # ─────────────────────────────────────────────
@@ -310,9 +313,22 @@ def hurst_exponent(series: pd.Series, max_lag: int = 20) -> float:
         float: Hurst exponent H (typically 0.3 to 0.7)
     """
     arr  = np.array(series)
+    max_lag = min(max_lag, len(arr) - 1)
+    if max_lag <= 2 or np.std(arr) == 0:
+        return 0.5
+        
     lags = range(2, max_lag)
     tau  = [np.sqrt(np.std(arr[lag:] - arr[:-lag])) for lag in lags]
-    poly = np.polyfit(np.log(lags), np.log(tau), 1)
+    tau = np.array(tau)
+    valid = (tau > 0) & np.isfinite(tau)
+    
+    lags_arr = np.array(list(lags))[valid]
+    tau_arr = tau[valid]
+    
+    if len(lags_arr) < 2:
+        return 0.5
+
+    poly = np.polyfit(np.log(lags_arr), np.log(tau_arr), 1)
     return round(poly[0] * 2.0, 4)
 
 
@@ -447,8 +463,12 @@ def confidence_score(signals: dict, regime: str, atr_percentile: float) -> float
     consensus     = abs(sum(weighted_vals)) / (total_abs + 1e-9)
 
     vals      = list(signals.values())
-    mean_val  = sum(vals) / len(vals)
-    variance  = sum((v - mean_val) ** 2 for v in vals) / (len(vals) + 1e-9)
+    if not vals:
+        mean_val = 0
+        variance = 0
+    else:
+        mean_val  = sum(vals) / len(vals)
+        variance  = sum((v - mean_val) ** 2 for v in vals) / (len(vals) + 1e-9)
     dispersion_penalty = 1 - min(variance * 0.5, 0.8)
 
     regime_factor   = {"trending": 1.10, "mean_reverting": 1.05, "random": 0.72}.get(regime, 0.72)

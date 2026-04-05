@@ -10,7 +10,7 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(__file__))
 
-from confidence import compute_confidence
+from fusion_engine.confidence import compute_confidence
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
