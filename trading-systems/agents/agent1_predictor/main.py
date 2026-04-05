@@ -198,7 +198,20 @@ def run(symbol, mode="SAFE", allow_network=False, precomputed_df=None):
         "metadata": {
             "mode": mode,
             "network_allowed": allow_network,
-            "llm_provider": llm_provider
+            "llm_provider": llm_provider,
+            "chart_data": [
+                {
+                    "time": int(index.timestamp()),
+                    "open": float(row["open"]),
+                    "high": float(row["high"]),
+                    "low": float(row["low"]),
+                    "close": float(row["close"]),
+                    "volume": float(row["volume"]),
+                    "ema_50": float(row["ema_50"]) if "ema_50" in row and row["ema_50"] == row["ema_50"] else None,
+                    "ema_200": float(row["ema_200"]) if "ema_200" in row and row["ema_200"] == row["ema_200"] else None
+                }
+                for index, row in df.tail(100).iterrows()
+            ]
         }
     }
 
