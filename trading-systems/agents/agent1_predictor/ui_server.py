@@ -27,7 +27,10 @@ from flask import Flask, render_template, request, Response, stream_with_context
 app = Flask(__name__, template_folder="templates")
 
 # ── Shared state ───────────────────────────────────────────────────────────────
-_log_queue: queue.Queue = queue.Queue()
+# Each client gets its own queue (created per request), so no client can drain,
+# read, or terminate another's stream. The lock stays because the "Agent1" logger
+# is process-wide: two concurrent runs would attach two handlers and cross-post
+# every log line into both clients' queues.
 _analysis_lock = threading.Lock()   # Only one analysis at a time
 
 
@@ -47,31 +50,33 @@ class QueueLogHandler(logging.Handler):
 
 
 # ── Analysis runner (runs in a background thread) ─────────────────────────────
-def _run_analysis(symbol: str, allow_network: bool):
+def _run_analysis(symbol: str, allow_network: bool, out_queue: queue.Queue):
     """
     Imports and calls main.run() in a thread.
-    Injects a QueueLogHandler so every log line is sent to the SSE queue.
+    Injects a QueueLogHandler so every log line is sent to this client's queue.
+
+    Args:
+        out_queue: the requesting client's private queue. Every event this run
+                   emits goes here and nowhere else.
     """
     agent_logger = logging.getLogger("Agent1")
-    handler = QueueLogHandler(_log_queue)
+    handler = QueueLogHandler(out_queue)
 
-    # _log_queue is shared by every client, so two concurrent runs would interleave
-    # their logs into each other's SSE stream. Serialise them.
-    # ponytail: one global lock; a per-client queue is the upgrade if this ever
-    # needs to serve more than one analysis at a time.
+    # ponytail: global lock, one run at a time. Per-run log routing (a filter keyed
+    # on thread id) is the upgrade if concurrent analyses are ever needed.
     with _analysis_lock:
         agent_logger.addHandler(handler)
         try:
             # Lazy-import so we don't have import-time side effects
             from main import run
             result = run(symbol=symbol, mode="SAFE", allow_network=allow_network)
-            _log_queue.put(("result", result))
+            out_queue.put(("result", result))
         except Exception as e:
             tb = traceback.format_exc()
-            _log_queue.put(("error", f"{e}\n{tb}"))
+            out_queue.put(("error", f"{e}\n{tb}"))
         finally:
             agent_logger.removeHandler(handler)
-            _log_queue.put(("done", None))
+            out_queue.put(("done", None))
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────
@@ -92,12 +97,9 @@ def analyze():
     allow_network = request.args.get("network", "false").lower() == "true"
 
     def generate():
-        # Drain any stale messages from a previous run
-        while not _log_queue.empty():
-            try:
-                _log_queue.get_nowait()
-            except queue.Empty:
-                break
+        # This client's private event queue. Nothing else reads or writes it, so
+        # there are no stale messages to drain and no foreign 'done' to cut us off.
+        client_queue: queue.Queue = queue.Queue()
 
         # Signal the frontend that we're starting
         yield f"data: {json.dumps({'type': 'start', 'symbol': symbol})}\n\n"
@@ -105,7 +107,7 @@ def analyze():
         # Launch analysis in background thread
         t = threading.Thread(
             target=_run_analysis,
-            args=(symbol, allow_network),
+            args=(symbol, allow_network, client_queue),
             daemon=True,
         )
         t.start()
@@ -113,7 +115,7 @@ def analyze():
         # Forward all events from the queue to the client
         while True:
             try:
-                item = _log_queue.get(timeout=60)
+                item = client_queue.get(timeout=60)
             except queue.Empty:
                 yield f"data: {json.dumps({'type': 'heartbeat'})}\n\n"
                 continue

@@ -1,5 +1,5 @@
 """
-guardian.py  —  The Risk Management Safety Check
+﻿guardian.py  —  The Risk Management Safety Check
 =================================================
 This is the LAST LINE OF DEFENCE before any trade recommendation goes out.
 
@@ -25,6 +25,7 @@ Used by: main.py → called before the prediction is finalised and returned.
 """
 
 import json
+import math
 import os
 from logger import get_logger
 
@@ -105,13 +106,12 @@ class GuardianAgent:
         # Never put more than the maximum allowed % of the portfolio in one trade.
         # Default cap: 10% — set in config.json
         max_alloc = _RISK.get("allocation_pct", 10.0)
-        safe_alloc = min(allocation_pct, max_alloc)
+        safe_alloc = max(0.0, min(allocation_pct, max_alloc))
         if allocation_pct > max_alloc:
             logger.warning(
                 f"[Guardian] Allocation {allocation_pct}% exceeds cap {max_alloc}%. "
                 f"Capped at {safe_alloc}%."
             )
-
         # ── Rule 4: Risk-Reward Ratio Check ──────────────────────────────────
         # For every ₹1 we risk, we must expect at least ₹2 in reward.
         # This is the classic 2:1 risk-reward rule used by professional traders.
@@ -169,6 +169,34 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation,
         risk   = abs(entry_price - stop_loss) if entry_price != stop_loss else entry_price * 0.01
         target = (entry_price + risk * 2) if action == "BUY" else (entry_price - risk * 2)
         logger.debug("[Guardian] No target supplied — RR check is running against a synthetic 2R target.")
+
+    # ── Target sanity gate (must run before evaluate) ─────────────────────────
+    # Rule 4 measures reward as abs(target - entry), which is blind in two ways:
+    # a non-finite target makes `rr_ratio < min_rr` False so the rule never fires,
+    # and a backwards target (BUY below entry) reads as profit instead of loss.
+    # Screen both out here — the only path into GuardianAgent.evaluate().
+    # Coerce as we validate, so every comparison below runs on a real float
+    # (numpy scalars and numeric strings normalise; NaN/inf/junk fall through).
+    try:
+        target = float(target)
+        target_is_finite = math.isfinite(target)
+    except (TypeError, ValueError):
+        target_is_finite = False
+
+    if not target_is_finite:
+        reason = f"REJECTED: Target price {target!r} is not a finite number."
+        logger.warning(f"[Guardian] {reason}")
+        return "REJECTED", reason, 0.0
+
+    # Direction only applies to live trades — HOLD legitimately passes target == entry.
+    if action == "BUY" and target <= entry_price:
+        reason = f"REJECTED: BUY target {target:.2f} is not above entry {entry_price:.2f}."
+        logger.warning(f"[Guardian] {reason}")
+        return "REJECTED", reason, 0.0
+    if action == "SELL" and target >= entry_price:
+        reason = f"REJECTED: SELL target {target:.2f} is not below entry {entry_price:.2f}."
+        logger.warning(f"[Guardian] {reason}")
+        return "REJECTED", reason, 0.0
 
     # Use real ATR if provided, otherwise fall back to rough estimate
     # Real ATR is always preferred — the estimate can be inaccurate for volatile symbols
