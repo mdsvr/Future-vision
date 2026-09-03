@@ -115,6 +115,52 @@ def test_guardian_rejects_bad_risk_reward():
     assert alloc > 0, "approved trade came back with zero allocation"
 
 
+def test_guardian_rejects_unusable_targets():
+    """abs(target - entry) is blind to NaN and to backwards targets — screen them first."""
+    from guardian import run_guardian_checks
+
+    common = dict(
+        confidence=0.90, atr_percentile=0.5, allocation=2.0,
+        entry_price=100.0, stop_loss=90.0, atr_val=5.0,
+    )
+    for bad in (float("nan"), float("inf"), float("-inf"), "not-a-price", object()):
+        status, reason, alloc = run_guardian_checks(action="BUY", target=bad, **common)
+        assert status == "REJECTED", f"target={bad!r} gave {status}: {reason}"
+        assert alloc == 0.0
+
+    # None is the documented "synthesise a 2R target" path, not a bad target
+    status, reason, _ = run_guardian_checks(action="BUY", target=None, **common)
+    assert status == "APPROVED", f"synthesised target should pass, got {reason}"
+
+    # Numeric-but-not-float targets coerce rather than crash the comparison
+    status, _, _ = run_guardian_checks(action="BUY", target="125", **common)
+    assert status == "APPROVED", "numeric string target should coerce and pass"
+
+    # Backwards targets: reward would read as profit because of the abs()
+    status, _, _ = run_guardian_checks(action="BUY", target=75.0, **common)
+    assert status == "REJECTED", "BUY target below entry should not pass"
+    status, _, _ = run_guardian_checks(
+        action="SELL", target=125.0,
+        **{**common, "stop_loss": 110.0}
+    )
+    assert status == "REJECTED", "SELL target above entry should not pass"
+
+    # HOLD legitimately carries target == entry and must still pass
+    status, _, _ = run_guardian_checks(action="HOLD", target=100.0, **common)
+    assert status == "APPROVED", "HOLD must not be caught by the directional check"
+
+
+def test_guardian_never_returns_negative_allocation():
+    """The cap only bounds the top; a sign error must not survive to the caller."""
+    from guardian import run_guardian_checks
+
+    _, _, alloc = run_guardian_checks(
+        action="BUY", confidence=0.90, atr_percentile=0.5, allocation=-5.0,
+        entry_price=100.0, stop_loss=90.0, atr_val=5.0, target=125.0,
+    )
+    assert alloc == 0.0, f"negative allocation survived as {alloc}"
+
+
 def test_guardian_caps_oversized_allocation():
     """Rule 3's cap is only real if the caller receives the capped number back."""
     from guardian import run_guardian_checks, _RISK
