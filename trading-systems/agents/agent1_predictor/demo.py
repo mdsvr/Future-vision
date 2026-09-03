@@ -16,10 +16,13 @@ OUTPUT:
 
 import sys
 import os
+import asyncio
 import pandas as pd
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 # ── Load our indicator functions ──────────────────────────────────────────────
-from indicators import (
+from indicator_engine.indicators import (
     ema, rsi, macd, bollinger_bands, stochastic_rsi,
     atr, obv, obv_slope, vwap,
     hurst_exponent, classify_regime,
@@ -57,30 +60,24 @@ def signal_str(s):
 
 # ── Fetch data ─────────────────────────────────────────────────────────────────
 def fetch_data(symbol: str) -> pd.DataFrame:
-    """Fetches OHLCV data using the project's data_ingestion module."""
-    from data_ingestion import fetch_ohlcv
-    import json, os
+    """Fetches OHLCV data using the project's data_layer providers."""
+    import json
 
-    # Temporarily override the symbol in config for the fetch
     cfg_path = os.path.join(os.path.dirname(__file__), "config.json")
     with open(cfg_path) as f:
-        import json
         cfg = json.load(f)
 
-    # Determine provider
-    provider_name = cfg["data"].get("market_data_provider", "yfinance")
     interval = cfg["data"]["interval"]
     period   = cfg["data"]["period"]
 
+    # Providers are async — drive them from a one-shot event loop.
     if symbol.startswith("NSE:") or symbol.startswith("BSE:"):
-        # Override to fyers if symbol looks like Indian format
-        from data_ingestion import FyersProvider
-        df = FyersProvider().fetch(symbol, interval, period)
-    else:
-        from data_ingestion import YFinanceProvider
-        df = YFinanceProvider().fetch(symbol, "15m", "30d")
+        # Indian symbol format → Fyers, regardless of what config says
+        from data_layer.live_market_feed import FyersProvider
+        return asyncio.run(FyersProvider().fetch(symbol, interval, period))
 
-    return df
+    from data_layer.live_market_feed import YFinanceProvider
+    return asyncio.run(YFinanceProvider().fetch(symbol, "15m", "30d"))
 
 
 def main():

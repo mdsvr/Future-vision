@@ -115,7 +115,7 @@ def generate_signals(df: pd.DataFrame, regime: str = None) -> dict:
     bb_upper = latest.get('bb_upper', None)
     bb_lower = latest.get('bb_lower', None)
 
-    if bb_upper is not None and bb_lower is not None:
+    if close is not None and bb_upper is not None and bb_lower is not None:
         if close > bb_upper:
             signals['mean_reversion'] = -1   # Above upper band = overextended (sell)
         elif close < bb_lower:

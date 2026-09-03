@@ -54,19 +54,24 @@ def _run_analysis(symbol: str, allow_network: bool):
     """
     agent_logger = logging.getLogger("Agent1")
     handler = QueueLogHandler(_log_queue)
-    agent_logger.addHandler(handler)
 
-    try:
-        # Lazy-import so we don't have import-time side effects
-        from main import run
-        result = run(symbol=symbol, mode="SAFE", allow_network=allow_network)
-        _log_queue.put(("result", result))
-    except Exception as e:
-        tb = traceback.format_exc()
-        _log_queue.put(("error", f"{e}\n{tb}"))
-    finally:
-        agent_logger.removeHandler(handler)
-        _log_queue.put(("done", None))
+    # _log_queue is shared by every client, so two concurrent runs would interleave
+    # their logs into each other's SSE stream. Serialise them.
+    # ponytail: one global lock; a per-client queue is the upgrade if this ever
+    # needs to serve more than one analysis at a time.
+    with _analysis_lock:
+        agent_logger.addHandler(handler)
+        try:
+            # Lazy-import so we don't have import-time side effects
+            from main import run
+            result = run(symbol=symbol, mode="SAFE", allow_network=allow_network)
+            _log_queue.put(("result", result))
+        except Exception as e:
+            tb = traceback.format_exc()
+            _log_queue.put(("error", f"{e}\n{tb}"))
+        finally:
+            agent_logger.removeHandler(handler)
+            _log_queue.put(("done", None))
 
 
 # ── Routes ─────────────────────────────────────────────────────────────────────

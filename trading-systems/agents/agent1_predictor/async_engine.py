@@ -32,8 +32,9 @@ import asyncio
 import time
 import logging
 from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
 from typing import Optional
+
+from data_layer.live_market_feed import fetch_ohlcv
 
 logger = logging.getLogger(__name__)
 
@@ -61,19 +62,13 @@ def _store_cached_features(symbol: str, df):
 
 # ── Sync worker functions (run in executor thread pool) ───────────────────────
 
-def _fetch_worker(symbol: str):
-    """Synchronous fetch — runs in thread pool."""
-    from data_ingestion import fetch_ohlcv
-    return fetch_ohlcv(symbol)
-
-
-# Note: feature computation has been fully parallelized natively and does not require a simple worker.
+# Note: fetch_ohlcv and feature computation are natively async — no thread worker needed.
 
 
 def _regime_signals_worker(df, symbol: str):
     """Synchronous regime classification and signal generation."""
-    from regime import classify_regime
-    from strategy_engine import generate_signals
+    from fusion_engine.regime import classify_regime
+    from fusion_engine.strategy_engine import generate_signals
     regime, hurst = classify_regime(df)
     signals = generate_signals(df, regime)
     return regime, hurst, signals
@@ -109,9 +104,9 @@ async def run_pipeline_async(symbol: str, executor: Optional[ThreadPoolExecutor]
         df_features = _get_cached_features(symbol)
 
         if df_features is None:
-            # ── Step 2: Fetch OHLCV (async, thread pool) ──────────────────────
+            # ── Step 2: Fetch OHLCV (natively async) ──────────────────────────
             logger.info(f"[AsyncEngine] Fetching {symbol}...")
-            df_raw = await loop.run_in_executor(executor, _fetch_worker, symbol)
+            df_raw = await fetch_ohlcv(symbol)
 
             if df_raw is None or len(df_raw) == 0:
                 logger.error(f"[AsyncEngine] Data fetch failed for {symbol}")

@@ -66,8 +66,14 @@ def run(symbol, mode="SAFE", allow_network=False, precomputed_df=None):
             return
 
     # --- Step 2: Feature Engineering & Indicators ---
-    logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
-    df = compute_features(df)
+    # A precomputed_df may arrive either raw (API layer hands us fetch_ohlcv output)
+    # or already enriched (--fast async pipeline). Key off the columns, not the caller:
+    # compute_features() calls asyncio.run(), which explodes if we're already inside a loop.
+    if 'atr' in df.columns:
+        logger.info("[Process] DataFrame already carries indicators — skipping recomputation.")
+    else:
+        logger.info("[Process] Computing technical indicators (EMA, MACD, RSI, OBV, ATR)...")
+        df = compute_features(df)
 
     # Guard: compute_features may return an empty DataFrame if the data is too short
     # or all-zero volume (e.g. index symbols during warm-up). Abort cleanly.
@@ -129,21 +135,25 @@ def run(symbol, mode="SAFE", allow_network=False, precomputed_df=None):
 
     # --- Step 6: The Guardian (Final Safety Gate) ---
     # Guardian checks risk levels, volatility, and confidence before approving a trade
-    status, reason = run_guardian_checks(
+    status, reason, safe_allocation = run_guardian_checks(
         action=action,
         confidence=confidence,
         atr_percentile=atr_percentile,
         allocation=allocation,
         entry_price=entry_price,
         stop_loss=stop_loss,
-        atr_val=atr_val           # Pass real ATR (not approximated from percentile)
+        atr_val=atr_val,          # Pass real ATR (not approximated from percentile)
+        target=target             # Pass the real target, or Rule 4 grades its own homework
     )
     logger.info(f"[Guardian] Gatekeeper -> Status: {status} | Reason: {reason}")
-    
+
     if status == "REJECTED":
         action = "HOLD"
         allocation = 0.0
         logger.info("[Guardian] Vetoed the trade. Reverting to HOLD.")
+    else:
+        # Honour the Guardian's allocation cap instead of discarding it
+        allocation = safe_allocation
 
     # --- Step 7: Descriptive Reasoning (LLM or Fallback) ---
     # Pass raw indicator values so explanation_builder produces per-indicator narratives

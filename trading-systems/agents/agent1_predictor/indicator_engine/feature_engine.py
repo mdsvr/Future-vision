@@ -57,8 +57,19 @@ def compute_features(df: pd.DataFrame) -> pd.DataFrame:
     Synchronous wrapper for compute_features_async.
     Used by components that still rely on sequential/blocking patterns (like safe mode).
     Will initialize a ThreadPoolExecutor implicitly.
+
+    Callers already inside an event loop should await compute_features_async()
+    directly — asyncio.run() cannot re-enter a running loop.
     """
-    return asyncio.run(compute_features_async(df))
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(compute_features_async(df))
+
+    # ponytail: already in a loop — hand the coroutine to a worker thread so this
+    # stays a working sync call. It blocks the loop; await the async version instead.
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(asyncio.run, compute_features_async(df)).result()
 
 async def compute_features_async(df: pd.DataFrame, executor: ThreadPoolExecutor = None) -> pd.DataFrame:
     """

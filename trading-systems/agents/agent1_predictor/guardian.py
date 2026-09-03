@@ -139,9 +139,9 @@ class GuardianAgent:
 # This function keeps that import working without changing main.py.
 
 def run_guardian_checks(action, confidence, atr_percentile, allocation,
-                        entry_price, stop_loss, atr_val=None):
+                        entry_price, stop_loss, atr_val=None, target=None):
     """
-    Backward-compatible wrapper so main.py doesn't need to be modified.
+    Wrapper that adapts main.py's argument shape to GuardianAgent.evaluate().
 
     Args:
         action         (str):   "BUY", "SELL", or "HOLD"
@@ -152,12 +152,23 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation,
         stop_loss      (float): Stop-loss price
         atr_val        (float): OPTIONAL — actual ATR value in price units.
                                 If not provided, estimated from atr_percentile.
+        target         (float): OPTIONAL — the caller's real target price.
+                                Without it the RR check can only measure a
+                                synthesised 2R target, i.e. it always passes.
+
+    Returns:
+        tuple: (status, reason, safe_allocation)
+            status          "APPROVED" or "REJECTED"
+            safe_allocation the allocation after the Rule 3 cap is applied
     """
     guardian = GuardianAgent()
 
-    # Estimate a target price for the RR check (entry ± 2× risk)
-    risk   = abs(entry_price - stop_loss) if entry_price != stop_loss else entry_price * 0.01
-    target = (entry_price + risk * 2) if action == "BUY" else (entry_price - risk * 2)
+    if target is None:
+        # No real target supplied — synthesise entry ± 2R. This makes Rule 4
+        # tautological, so warn rather than pretend the check ran.
+        risk   = abs(entry_price - stop_loss) if entry_price != stop_loss else entry_price * 0.01
+        target = (entry_price + risk * 2) if action == "BUY" else (entry_price - risk * 2)
+        logger.debug("[Guardian] No target supplied — RR check is running against a synthetic 2R target.")
 
     # Use real ATR if provided, otherwise fall back to rough estimate
     # Real ATR is always preferred — the estimate can be inaccurate for volatile symbols
@@ -168,7 +179,7 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation,
         atr = atr_percentile * entry_price * 0.01
         logger.debug(f"[Guardian] Using estimated ATR={atr:.2f} (real ATR not provided)")
 
-    status, reason, _ = guardian.evaluate(
+    status, reason, safe_alloc = guardian.evaluate(
         action=action,
         confidence=confidence,
         entry_price=entry_price,
@@ -179,4 +190,4 @@ def run_guardian_checks(action, confidence, atr_percentile, allocation,
     )
 
     # Translate to the old return vocabulary (main.py checks for "REJECTED")
-    return ("REJECTED" if status == "BLOCKED" else status), reason
+    return ("REJECTED" if status == "BLOCKED" else status), reason, safe_alloc

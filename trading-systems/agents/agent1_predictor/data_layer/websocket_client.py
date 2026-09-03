@@ -109,7 +109,9 @@ class MarketStreamer:
             from fyers_apiv3.FyersWebsocket import data_ws
         except ImportError:
             logger.error("[Fyers WS] fyers_apiv3 SDK not installed! Falling back to Simulator.")
-            async for df in self._simulate_stream(): yield df; return
+            async for df in self._simulate_stream():
+                yield df
+            return
 
         # Load auth from Config
         try:
@@ -120,7 +122,9 @@ class MarketStreamer:
             
         if not access_token:
             logger.warning("[Fyers WS] No ACCESS_TOKEN found in config. Falling back to Simulator.")
-            async for df in self._simulate_stream(): yield df; return
+            async for df in self._simulate_stream():
+                yield df
+            return
 
         # 1. Fetch initial background DataFrame to anchor the live aggregator
         historical_df = await fetch_ohlcv(self.symbol)
@@ -130,6 +134,7 @@ class MarketStreamer:
             
         aggregator = TickAggregator(historical_df)
         queue = asyncio.Queue()
+        loop = asyncio.get_running_loop()   # captured here — the SDK callback thread has no loop of its own
 
         def custom_message(msg):
             # Fyers callback: push tick into asyncio Queue thread-safely
@@ -143,8 +148,8 @@ class MarketStreamer:
                     if price > 0:
                         # Schedule pushing to queue from synchronous callback
                         asyncio.run_coroutine_threadsafe(
-                            queue.put({"price": price, "vol": vol, "ts": ts}), 
-                            asyncio.get_event_loop()
+                            queue.put({"price": price, "vol": vol, "ts": ts}),
+                            loop
                         )
             except Exception as e:
                 logger.error(f"[Fyers WS] Callback parsing error: {e}")
@@ -196,8 +201,9 @@ class MarketStreamer:
         If config requests Fyers, dispatch to _fyers_stream().
         Otherwise, fallback to the Simulator.
         """
-        import json
-        with open("config.json", "r") as f:
+        import json, os
+        cfg_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.json")
+        with open(cfg_path, "r") as f:
             cfg = json.load(f)
             provider = cfg.get("data", {}).get("market_data_provider", "").lower()
             

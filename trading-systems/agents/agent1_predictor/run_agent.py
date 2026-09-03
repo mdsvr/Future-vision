@@ -377,7 +377,7 @@ def friendly_output(result, symbol, market="US"):
         risk_amount = abs(entry - stop)
         risk_pct    = (risk_amount / entry) * 100
         risk_desc   = (
-            f"If things go wrong, the safety stop-loss is at ${stop:.2f} — "
+            f"If things go wrong, the safety stop-loss is at {currency}{stop:.2f} — "
             f"that's a {risk_pct:.1f}% risk from entry."
         )
     else:
@@ -385,7 +385,7 @@ def friendly_output(result, symbol, market="US"):
 
     target_price = targets[0] if targets else entry
     if target_price > entry:
-        reward_desc = f"Target price if BUY succeeds: ${target_price:.2f}"
+        reward_desc = f"Target price if BUY succeeds: {currency}{target_price:.2f}"
     else:
         reward_desc = ""
 

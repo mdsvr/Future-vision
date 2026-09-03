@@ -3,8 +3,24 @@ pandas
 numpy
 python-dotenv
 jsonschema
-openai
-anthropic
-google-generativeai
-alpaca-trade-api
 requests
+aiohttp
+
+# API + dashboard
+fastapi
+uvicorn
+flask
+
+# Cache (optional at runtime — falls back to an in-memory dict)
+redis
+
+# Market data / execution
+fyers-apiv3
+alpaca-trade-api
+
+# LLM reasoning (all optional — deterministic fallback if absent)
+google-genai
+openai
+
+# Tests
+pytest
